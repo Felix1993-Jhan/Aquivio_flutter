@@ -2065,6 +2065,7 @@ class _MainNavigationPageState extends State<MainNavigationPage> {
       await Future.delayed(const Duration(milliseconds: 400));
     }
     // 額外等待確保最後一個回應也被接收
+    
     await Future.delayed(const Duration(milliseconds: 300));
   }
 
