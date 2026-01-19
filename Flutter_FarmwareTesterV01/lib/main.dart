@@ -21,7 +21,6 @@ import 'package:flutter_libserialport/flutter_libserialport.dart';
 import 'package:window_manager/window_manager.dart';
 
 import 'services/serial_port_manager.dart';
-import 'services/ur_command_builder.dart';
 import 'services/data_storage_service.dart';
 import 'services/localization_service.dart';
 import 'services/threshold_settings_service.dart';
@@ -33,6 +32,9 @@ import 'widgets/auto_detection_page.dart';
 import 'widgets/settings_page.dart';
 import 'widgets/splash_screen.dart';
 import 'widgets/firmware_upload_page.dart';
+import 'controllers/auto_detection_controller.dart';
+import 'controllers/serial_controller.dart';
+import 'controllers/firmware_controller.dart';
 
 // ==================== 應用程式入口 ====================
 
@@ -89,7 +91,8 @@ class MainNavigationPage extends StatefulWidget {
   State<MainNavigationPage> createState() => _MainNavigationPageState();
 }
 
-class _MainNavigationPageState extends State<MainNavigationPage> {
+class _MainNavigationPageState extends State<MainNavigationPage>
+    with AutoDetectionController, SerialController, FirmwareController {
   // ==================== 串口管理器 ====================
 
   final SerialPortManager _arduinoManager =
@@ -183,10 +186,200 @@ class _MainNavigationPageState extends State<MainNavigationPage> {
   /// 燒入狀態訊息
   String? _programStatus;
 
+  // ==================== 連接重試計數 ====================
+
+  /// Arduino 連接重試計數
+  int _arduinoConnectRetryCount = 0;
+
+  /// STM32 連接重試計數
+  int _urConnectRetryCount = 0;
+
   // ==================== UI 控制器 ====================
 
   final TextEditingController _urHexController = TextEditingController();
   final TextEditingController _flowController = TextEditingController();
+
+  // ==================== AutoDetectionController Mixin 實作 ====================
+
+  @override
+  bool get isAutoDetecting => _isAutoDetecting;
+
+  @override
+  bool get isAutoDetectionCancelled => _autoDetectionCancelled;
+
+  @override
+  DataStorageService get dataStorage => _dataStorage;
+
+  @override
+  SerialPortManager get arduinoManager => _arduinoManager;
+
+  @override
+  SerialPortManager get urManager => _urManager;
+
+  @override
+  List<String> get availablePorts => _availablePorts;
+
+  @override
+  String? get selectedArduinoPort => _selectedArduinoPort;
+
+  @override
+  String? get selectedUrPort => _selectedUrPort;
+
+  @override
+  void setAutoDetectionState(String status, double progress) {
+    setState(() {
+      _autoDetectionStatus = status;
+      _autoDetectionProgress = progress;
+    });
+  }
+
+  @override
+  void beginAutoDetection() {
+    setState(() {
+      _isAutoDetecting = true;
+      _autoDetectionCancelled = false;
+      _autoDetectionStatus = tr('auto_detection_step_connect');
+      _autoDetectionProgress = 0.0;
+    });
+  }
+
+  @override
+  void endAutoDetection() {
+    if (mounted) {
+      setState(() {
+        _isAutoDetecting = false;
+        _autoDetectionProgress = 1.0;
+      });
+    }
+  }
+
+  @override
+  void setSelectedArduinoPort(String port) {
+    setState(() => _selectedArduinoPort = port);
+  }
+
+  @override
+  void setSelectedUrPort(String port) {
+    setState(() => _selectedUrPort = port);
+  }
+
+  @override
+  void setCurrentReadingState(int? id, String? section) {
+    setState(() {
+      _currentReadingId = id;
+      _currentReadingSection = section;
+    });
+  }
+
+  @override
+  void clearCurrentReadingState() {
+    setState(() {
+      _currentReadingId = null;
+      _currentReadingSection = null;
+    });
+  }
+
+  @override
+  void refreshPorts() => _refreshPorts();
+
+  @override
+  void showSnackBarMessage(String message) => _showSnackBar(message);
+
+  @override
+  void showTestResultDialog(
+    bool passed,
+    List<String> failedIdleItems,
+    List<String> failedRunningItems,
+    List<String> failedSensorItems,
+  ) => _showTestResultDialog(passed, failedIdleItems, failedRunningItems, failedSensorItems);
+
+  // ==================== SerialController Mixin 實作 ====================
+
+  @override
+  set selectedArduinoPort(String? value) => setState(() => _selectedArduinoPort = value);
+
+  @override
+  set selectedUrPort(String? value) => setState(() => _selectedUrPort = value);
+
+  @override
+  bool get isFlowOn => _isFlowOn;
+
+  @override
+  set isFlowOn(bool value) => _isFlowOn = value;
+
+  @override
+  Timer? get flowReadTimer => _flowReadTimer;
+
+  @override
+  set flowReadTimer(Timer? value) => _flowReadTimer = value;
+
+  @override
+  Timer? get urVerificationTimer => _urVerificationTimer;
+
+  @override
+  set urVerificationTimer(Timer? value) => _urVerificationTimer = value;
+
+  @override
+  bool get urConnectionVerified => _urConnectionVerified;
+
+  @override
+  set urConnectionVerified(bool value) => _urConnectionVerified = value;
+
+  @override
+  int get arduinoConnectRetryCount => _arduinoConnectRetryCount;
+
+  @override
+  set arduinoConnectRetryCount(int value) => _arduinoConnectRetryCount = value;
+
+  @override
+  int get urConnectRetryCount => _urConnectRetryCount;
+
+  @override
+  set urConnectRetryCount(int value) => _urConnectRetryCount = value;
+
+  @override
+  void showErrorDialogMessage(String message) => _showErrorDialog(message);
+
+  // ==================== FirmwareController Mixin 實作 ====================
+
+  @override
+  StLinkProgrammerService get stLinkService => _stLinkService;
+
+  @override
+  bool get isProgramming => _isProgramming;
+
+  @override
+  set isProgramming(bool value) => setState(() => _isProgramming = value);
+
+  @override
+  bool get isStLinkConnected => _isStLinkConnected;
+
+  @override
+  String? get selectedFirmwarePath => _selectedFirmwarePath;
+
+  @override
+  int get stLinkFrequency => _stLinkFrequency;
+
+  @override
+  double get programProgress => _programProgress;
+
+  @override
+  set programProgress(double value) => setState(() => _programProgress = value);
+
+  @override
+  String? get programStatus => _programStatus;
+
+  @override
+  set programStatus(String? value) => setState(() => _programStatus = value);
+
+  @override
+  bool get isUrConnected => _urManager.isConnected;
+
+  @override
+  void disconnectUrPort() => disconnectUr();
+
+  @override
+  void startAutoDetectionProcess() => startAutoDetection();
 
   // ==================== 生命週期 ====================
 
@@ -216,27 +409,27 @@ class _MainNavigationPageState extends State<MainNavigationPage> {
       Future.delayed(const Duration(milliseconds: 200), () {
         if (_urManager.isConnected) {
           final payload = [0x02, 0xFF, 0xFF, 0x03, 0x00];
-          _sendUrCommand(payload);
+          sendUrCommand(payload);
         }
       });
       // 2. 發送清除流量計指令: 0x04 + ID 18 (0x12)
       Future.delayed(const Duration(milliseconds: 400), () {
         if (_urManager.isConnected) {
           final clearFlowPayload = [0x04, 0x12, 0x00, 0x00, 0x00];
-          _sendUrCommand(clearFlowPayload);
+          sendUrCommand(clearFlowPayload);
         }
       });
     };
 
     // 設置 STM32 連接驗證回調
     _urManager.onConnectionVerified = (bool success) {
-      _cancelUrVerificationTimeout();
+      cancelUrVerificationTimeout();
       if (success) {
         _urConnectionVerified = true;
         // 連接驗證成功，啟動心跳機制
         _urManager.startHeartbeat();
         // 連接驗證成功，發送 flowoff 到 Arduino
-        _sendArduinoFlowoff();
+        sendArduinoFlowoff();
       }
     };
 
@@ -427,7 +620,7 @@ class _MainNavigationPageState extends State<MainNavigationPage> {
 
   /// 處理 Arduino USB 斷開
   void _handleArduinoDisconnected() {
-    _stopAutoFlowRead();  // 停止自動流量讀取
+    stopAutoFlowRead();  // 停止自動流量讀取
     _arduinoManager.forceClose();  // 強制關閉連接
     if (mounted) {
       setState(() {
@@ -439,7 +632,7 @@ class _MainNavigationPageState extends State<MainNavigationPage> {
 
   /// 處理 Arduino 心跳失敗（連接可能已斷開或連接錯誤）
   void _handleArduinoHeartbeatFailed() {
-    _stopAutoFlowRead();  // 停止自動流量讀取
+    stopAutoFlowRead();  // 停止自動流量讀取
     _arduinoManager.forceClose();  // 強制關閉連接
     if (mounted) {
       setState(() {
@@ -451,7 +644,7 @@ class _MainNavigationPageState extends State<MainNavigationPage> {
 
   /// 處理 STM32 USB 斷開
   void _handleStm32Disconnected() {
-    _cancelUrVerificationTimeout();  // 取消驗證超時
+    cancelUrVerificationTimeout();  // 取消驗證超時
     _urManager.forceClose();  // 強制關閉連接
     if (mounted) {
       setState(() {
@@ -463,8 +656,8 @@ class _MainNavigationPageState extends State<MainNavigationPage> {
 
   /// 處理 STM32 心跳失敗（連接可能已斷開或連接錯誤）
   void _handleStm32HeartbeatFailed() {
-    _cancelUrVerificationTimeout();  // 取消驗證超時
-    _sendArduinoFlowoff();  // 發送 flowoff 到 Arduino
+    cancelUrVerificationTimeout();  // 取消驗證超時
+    sendArduinoFlowoff();  // 發送 flowoff 到 Arduino
     _urManager.forceClose();  // 強制關閉連接
     if (mounted) {
       setState(() {
@@ -545,261 +738,7 @@ class _MainNavigationPageState extends State<MainNavigationPage> {
     );
   }
 
-  // ==================== Arduino 操作 ====================
-
-  /// Arduino 連接重試計數
-  int _arduinoConnectRetryCount = 0;
-
-  /// Arduino 連接重試最大次數
-  static const int _maxConnectRetry = 6;
-
-  void _connectArduino() {
-    if (_selectedArduinoPort == null) {
-      _showSnackBar(tr('select_arduino_port'));
-      return;
-    }
-    if (_selectedArduinoPort == _selectedUrPort && _urManager.isConnected) {
-      _showSnackBar(tr('arduino_port_in_use'));
-      return;
-    }
-
-    _arduinoConnectRetryCount = 0;
-    _tryConnectArduino();
-  }
-
-  /// 嘗試連接 Arduino（支援自動重試）
-  void _tryConnectArduino() {
-    if (_selectedArduinoPort == null) return;
-
-    if (_arduinoManager.open(_selectedArduinoPort!)) {
-      _arduinoManager.startHeartbeat();  // 啟動心跳機制
-      setState(() {});
-      _showSnackBar(tr('arduino_connected'));
-      _arduinoConnectRetryCount = 0;
-      // 連接成功後發送 flowoff
-      Future.delayed(const Duration(milliseconds: 500), () {
-        _sendArduinoFlowoff();
-      });
-    } else {
-      _arduinoConnectRetryCount++;
-      if (_arduinoConnectRetryCount < _maxConnectRetry) {
-        // 連接失敗，500ms 後自動重試
-        _showSnackBar(tr('arduino_connecting').replaceAll('{current}', '$_arduinoConnectRetryCount').replaceAll('{max}', '$_maxConnectRetry'));
-        Future.delayed(const Duration(milliseconds: 500), () {
-          if (mounted && !_arduinoManager.isConnected) {
-            _tryConnectArduino();
-          }
-        });
-      } else {
-        _showSnackBar(tr('arduino_connect_failed'));
-        _arduinoConnectRetryCount = 0;
-      }
-    }
-  }
-
-  void _disconnectArduino() {
-    _sendArduinoFlowoff();  // 斷開前發送 flowoff
-    _stopAutoFlowRead();  // 斷開時停止自動流量讀取
-    _arduinoManager.close();
-    setState(() {});
-    _showSnackBar(tr('arduino_disconnected'));
-  }
-
-  /// 發送 flowoff 指令到 Arduino（如果已連接）
-  void _sendArduinoFlowoff() {
-    if (_arduinoManager.isConnected) {
-      _arduinoManager.sendString('flowoff');
-    }
-  }
-
-  void _sendArduinoCommand(String command) {
-    if (!_arduinoManager.isConnected) {
-      _showSnackBar(tr('connect_arduino_first'));
-      return;
-    }
-    _arduinoManager.sendString(command);
-
-    // 追蹤 flowon/flowoff 狀態
-    final lowerCommand = command.toLowerCase();
-    if (lowerCommand == 'flowon' || lowerCommand.startsWith('flowon')) {
-      _startAutoFlowRead();
-    } else if (lowerCommand == 'flowoff') {
-      // flowoff: 停止自動讀取 → 讀取一次 flow → 清除 flow
-      _stopAutoFlowReadAndClear();
-    }
-  }
-
-  /// 啟動自動流量讀取（每 2 秒讀取 STM32 flow ID 18）
-  void _startAutoFlowRead() {
-    if (_isFlowOn) return;  // 已經在運行中
-
-    _isFlowOn = true;
-    _flowReadTimer?.cancel();
-    _flowReadTimer = Timer.periodic(const Duration(seconds: 2), (_) {
-      if (_urManager.isConnected && _isFlowOn) {
-        // 發送 0x03 讀取指令讀取 ID 18 (flow)
-        final payload = [0x03, 18, 0x00, 0x00, 0x00];
-        final cmd = URCommandBuilder.buildCommand(payload);
-        _urManager.sendHex(cmd);
-      }
-    });
-  }
-
-  /// 停止自動流量讀取
-  void _stopAutoFlowRead() {
-    _isFlowOn = false;
-    _flowReadTimer?.cancel();
-    _flowReadTimer = null;
-  }
-
-  /// 停止自動流量讀取並執行 flowoff 後續動作
-  /// 1. 停止自動讀取
-  /// 2. 讀取一次 STM32 flow 數值
-  /// 3. 發送清除 flow 指令
-  void _stopAutoFlowReadAndClear() {
-    _stopAutoFlowRead();
-
-    if (_urManager.isConnected) {
-      // 讀取一次 flow 數值 (ID 18)
-      final readPayload = [0x03, 18, 0x00, 0x00, 0x00];
-      final readCmd = URCommandBuilder.buildCommand(readPayload);
-      _urManager.sendHex(readCmd);
-
-      // 延遲 500ms 後發送清除 flow 指令
-      Future.delayed(const Duration(milliseconds: 500), () {
-        if (_urManager.isConnected) {
-          // 清除流量計指令: 0x04 + ID 18 (0x12)
-          final clearPayload = [0x04, 0x12, 0x00, 0x00, 0x00];
-          final clearCmd = URCommandBuilder.buildCommand(clearPayload);
-          _urManager.sendHex(clearCmd);
-        }
-      });
-    }
-  }
-
-  // ==================== STM32 操作 ====================
-
-  /// STM32 連接重試計數
-  int _urConnectRetryCount = 0;
-
-  /// STM32 連接驗證超時時間（毫秒）
-  static const int _urVerificationTimeoutMs = 2000;
-
-  /// 取消 STM32 連接驗證超時
-  void _cancelUrVerificationTimeout() {
-    _urVerificationTimer?.cancel();
-    _urVerificationTimer = null;
-  }
-
-  /// 啟動 STM32 連接驗證超時計時器
-  void _startUrVerificationTimeout() {
-    _cancelUrVerificationTimeout();
-    _urConnectionVerified = false;
-
-    _urVerificationTimer = Timer(Duration(milliseconds: _urVerificationTimeoutMs), () {
-      // 超時未收到正確回應
-      if (!_urConnectionVerified && _urManager.isConnected) {
-        _urManager.close();
-        setState(() {});
-        _showErrorDialog(tr('stm32_wrong_port'));
-      }
-    });
-  }
-
-  void _connectUr() {
-    if (_selectedUrPort == null) {
-      _showSnackBar(tr('select_stm32_port'));
-      return;
-    }
-    if (_selectedUrPort == _selectedArduinoPort && _arduinoManager.isConnected) {
-      _showSnackBar(tr('stm32_port_in_use'));
-      return;
-    }
-
-    _urConnectRetryCount = 0;
-    _tryConnectUr();
-  }
-
-  /// 嘗試連接 STM32（支援自動重試）
-  void _tryConnectUr() {
-    if (_selectedUrPort == null) return;
-
-    if (_urManager.open(_selectedUrPort!)) {
-      setState(() {});
-      _showSnackBar(tr('stm32_verifying'));
-      _urConnectRetryCount = 0;
-
-      // 啟動連接驗證超時（2秒內需收到正確回應）
-      _startUrVerificationTimeout();
-
-      // 連接成功後自動查詢韌體版本（作為 PING）
-      // 指令: 40 71 30 05 00 00 00 00 [CS]
-      // payload: [0x05, 0x00, 0x00, 0x00, 0x00]
-      Future.delayed(const Duration(milliseconds: 300), () {
-        if (_urManager.isConnected) {
-          final payload = [0x05, 0x00, 0x00, 0x00, 0x00];
-          final cmd = URCommandBuilder.buildCommand(payload);
-          _urManager.sendHex(cmd);
-        }
-      });
-    } else {
-      _urConnectRetryCount++;
-      if (_urConnectRetryCount < _maxConnectRetry) {
-        // 連接失敗，500ms 後自動重試
-        _showSnackBar(tr('stm32_connecting').replaceAll('{current}', '$_urConnectRetryCount').replaceAll('{max}', '$_maxConnectRetry'));
-        Future.delayed(const Duration(milliseconds: 500), () {
-          if (mounted && !_urManager.isConnected) {
-            _tryConnectUr();
-          }
-        });
-      } else {
-        _showSnackBar(tr('stm32_connect_failed'));
-        _urConnectRetryCount = 0;
-      }
-    }
-  }
-
-  void _disconnectUr() {
-    _cancelUrVerificationTimeout();  // 斷開時取消驗證超時
-    _sendArduinoFlowoff();  // 斷開時發送 flowoff 到 Arduino
-    _urManager.close();
-    setState(() {});
-    _showSnackBar(tr('stm32_disconnected'));
-  }
-
-  void _sendUrCommand(List<int> payload) {
-    if (!_urManager.isConnected) {
-      _showSnackBar(tr('connect_stm32_first'));
-      return;
-    }
-    final cmd = URCommandBuilder.buildCommand(payload);
-    _urManager.sendHex(cmd);
-
-    // 根據指令類型更新硬體狀態（Arduino 和 STM32 共用此狀態）
-    // 0x01/0x02 指令格式: [命令, lowByte, midByte, highByte, 0x00]
-    // lowByte/midByte/highByte 組成 24-bit 位元遮罩，每一位代表一個 ID
-    if (payload.length >= 4) {
-      final command = payload[0];
-      if (command == 0x01 || command == 0x02) {
-        // 從 payload 提取 24-bit 位元遮罩
-        final lowByte = payload[1];
-        final midByte = payload[2];
-        final highByte = payload[3];
-        final bitMask = lowByte | (midByte << 8) | (highByte << 16);
-
-        // 檢查每個 ID (0-23) 是否在位元遮罩中被設置
-        for (int id = 0; id < 24; id++) {
-          if ((bitMask & (1 << id)) != 0) {
-            // 此 ID 被選中，更新其硬體狀態
-            final state = (command == 0x01)
-                ? HardwareState.running
-                : HardwareState.idle;
-            _dataStorage.setHardwareState(id, state);
-          }
-        }
-      }
-    }
-  }
+  // ==================== 串口輸入處理 ====================
 
   void _sendUrFromInput() {
     if (!_urManager.isConnected) {
@@ -825,36 +764,11 @@ class _MainNavigationPageState extends State<MainNavigationPage> {
         payload.add(int.parse(hexStr.substring(i, i + 2), radix: 16));
       }
 
-      // 使用 _sendUrCommand 以便同時追蹤硬體狀態
-      _sendUrCommand(payload);
+      // 使用 mixin 的 sendUrCommand 以便同時追蹤硬體狀態
+      sendUrCommand(payload);
     } catch (e) {
       _showSnackBar(tr('parse_error').replaceAll('{error}', '$e'));
     }
-  }
-
-  // ==================== 快速讀取操作 ====================
-
-  /// Arduino 快速讀取
-  void _onArduinoQuickRead(String command) {
-    if (!_arduinoManager.isConnected) {
-      _showSnackBar(tr('connect_arduino_first'));
-      return;
-    }
-    _sendArduinoCommand(command);
-    _showSnackBar(tr('sent_arduino_command').replaceAll('{command}', command));
-  }
-
-  /// STM32 快速讀取 (使用 0x03 指令)
-  void _onStm32QuickRead(int id) {
-    if (!_urManager.isConnected) {
-      _showSnackBar(tr('connect_stm32_first'));
-      return;
-    }
-    // 建構 0x03 讀取指令: [0x03, ID, 0x00, 0x00, 0x00]
-    // 格式: 命令(1) + ID(1) + 數值(3 bytes, 讀取時填0)
-    final payload = [0x03, id, 0x00, 0x00, 0x00];
-    _sendUrCommand(payload);
-    _showSnackBar(tr('sent_stm32_read_command').replaceAll('{id}', '$id'));
   }
 
   // ==================== UI 建構 ====================
@@ -1099,7 +1013,7 @@ class _MainNavigationPageState extends State<MainNavigationPage> {
       case 3:
         return FirmwareUploadPage(
           isStm32Connected: _urManager.isConnected,
-          onDisconnectStm32: _disconnectUr,
+          onDisconnectStm32: disconnectUr,
         );
       case 4:
         return const SettingsPage();
@@ -1122,9 +1036,9 @@ class _MainNavigationPageState extends State<MainNavigationPage> {
             onPortChanged: (value) {
               setState(() => _selectedArduinoPort = value);
             },
-            onConnect: _connectArduino,
-            onDisconnect: _disconnectArduino,
-            onSendCommand: _sendArduinoCommand,
+            onConnect: connectArduino,
+            onDisconnect: disconnectArduino,
+            onSendCommand: sendArduinoCommand,
           ),
         ),
         const VerticalDivider(width: 1),
@@ -1138,9 +1052,9 @@ class _MainNavigationPageState extends State<MainNavigationPage> {
             onPortChanged: (value) {
               setState(() => _selectedUrPort = value);
             },
-            onConnect: _connectUr,
-            onDisconnect: _disconnectUr,
-            onSendPayload: _sendUrCommand,
+            onConnect: connectUr,
+            onDisconnect: disconnectUr,
+            onSendPayload: sendUrCommand,
             onSendFromInput: _sendUrFromInput,
           ),
         ),
@@ -1152,638 +1066,13 @@ class _MainNavigationPageState extends State<MainNavigationPage> {
   Widget _buildDataStoragePage() {
     return DataStoragePage(
       dataStorage: _dataStorage,
-      onArduinoQuickRead: _onArduinoQuickRead,
-      onStm32QuickRead: _onStm32QuickRead,
-      onStm32SendCommand: _onStm32SendCommand,
+      onArduinoQuickRead: onArduinoQuickRead,
+      onStm32QuickRead: onStm32QuickRead,
+      onStm32SendCommand: onStm32SendCommand,
     );
   }
 
-  // ==================== 自動檢測流程 ====================
-
-  /// 更新自動檢測狀態
-  void _updateAutoDetectionStatus(String status, double progress) {
-    if (mounted) {
-      setState(() {
-        _autoDetectionStatus = status;
-        _autoDetectionProgress = progress;
-      });
-    }
-  }
-
-  /// 開始自動檢測流程
-  Future<void> _startAutoDetection() async {
-    if (_isAutoDetecting) return;
-
-    // 清除所有數據，初始化頁面
-    _dataStorage.clearAllData();
-
-    setState(() {
-      _isAutoDetecting = true;
-      _autoDetectionCancelled = false;
-      _autoDetectionStatus = tr('auto_detection_step_connect');
-      _autoDetectionProgress = 0.0;
-    });
-
-    try {
-      // 步驟 1: 連接設備
-      _updateAutoDetectionStatus(tr('auto_detection_step_connect'), 0.0);
-      final connectResult = await _autoDetectionStep1Connect();
-      if (!connectResult || _autoDetectionCancelled) {
-        _endAutoDetection();
-        return;
-      }
-
-      // 步驟 2: 讀取無動作狀態 (Idle)
-      _updateAutoDetectionStatus(tr('auto_detection_step_idle'), 0.17);
-      final idleResult = await _autoDetectionStep2ReadIdle();
-      if (!idleResult || _autoDetectionCancelled) {
-        _endAutoDetection();
-        return;
-      }
-
-      // 步驟 3: 讀取動作中狀態 (Running)
-      _updateAutoDetectionStatus(tr('auto_detection_step_running'), 0.33);
-      final runningResult = await _autoDetectionStep3ReadRunning();
-      if (!runningResult || _autoDetectionCancelled) {
-        _endAutoDetection();
-        return;
-      }
-
-      // 步驟 4: 關閉 GPIO
-      _updateAutoDetectionStatus(tr('auto_detection_step_close'), 0.50);
-      await _autoDetectionStep4CloseGpio();
-      if (_autoDetectionCancelled) {
-        _endAutoDetection();
-        return;
-      }
-
-      // 步驟 5: 感測器測試
-      _updateAutoDetectionStatus(tr('auto_detection_step_sensor'), 0.67);
-      final sensorResult = await _autoDetectionStep5SensorTest();
-      if (!sensorResult || _autoDetectionCancelled) {
-        _endAutoDetection();
-        return;
-      }
-
-      // 步驟 6: 結果判定
-      _updateAutoDetectionStatus(tr('auto_detection_step_result'), 0.83);
-      await Future.delayed(const Duration(milliseconds: 500));
-      _autoDetectionStep6ShowResult();
-
-    } catch (e) {
-      _showSnackBar('自動檢測錯誤: $e');
-    } finally {
-      _endAutoDetection();
-    }
-  }
-
-  /// 結束自動檢測
-  void _endAutoDetection() {
-    if (mounted) {
-      setState(() {
-        _isAutoDetecting = false;
-        _autoDetectionProgress = 1.0;
-      });
-    }
-  }
-
-  /// 步驟 1: 連接設備
-  /// 先逐一嘗試連接 Arduino，成功後再逐一嘗試連接 STM32
-  Future<bool> _autoDetectionStep1Connect() async {
-    // 先刷新 COM 埠列表，確保有最新的可用埠
-    _refreshPorts();
-    await Future.delayed(const Duration(milliseconds: 300));
-
-    // 檢查是否有可用的 COM 埠
-    if (_availablePorts.isEmpty) {
-      _showSnackBar(tr('usb_not_connected'));
-      return false;
-    }
-
-    // ===== 第一階段：連接 Arduino =====
-    if (!_arduinoManager.isConnected) {
-      _updateAutoDetectionStatus(tr('connecting_arduino'), 0.02);
-
-      // 建立要嘗試的 COM 埠列表
-      // 如果已選擇的埠有效，優先嘗試；否則從第一個開始
-      final portsToTry = <String>[];
-      if (_selectedArduinoPort != null && _availablePorts.contains(_selectedArduinoPort)) {
-        portsToTry.add(_selectedArduinoPort!);
-        portsToTry.addAll(_availablePorts.where((p) => p != _selectedArduinoPort));
-      } else {
-        portsToTry.addAll(_availablePorts);
-      }
-
-      bool arduinoConnected = false;
-
-      // 逐一嘗試每個 COM 埠
-      for (int i = 0; i < portsToTry.length && !arduinoConnected; i++) {
-        if (_autoDetectionCancelled) return false;
-
-        final port = portsToTry[i];
-        _updateAutoDetectionStatus(
-          '${tr('connecting_arduino')} ($port, ${i + 1}/${portsToTry.length})',
-          0.02 + (i * 0.02)
-        );
-
-        // 嘗試開啟連接埠
-        if (_arduinoManager.open(port)) {
-          // 等待一下讓連接穩定（Arduino 重置後需要時間初始化）
-          await Future.delayed(const Duration(milliseconds: 1000));
-
-          // 發送測試指令驗證是否為 Arduino
-          _arduinoManager.sendString('s0');
-          await Future.delayed(const Duration(milliseconds: 1000));
-
-          // 檢查是否收到有效回應（Arduino 會回應數值）
-          final testData = _dataStorage.getArduinoLatestIdleData(0) ??
-                          _dataStorage.getArduinoLatestRunningData(0);
-
-          if (testData != null) {
-            // 確認是 Arduino，連接成功
-            _arduinoManager.startHeartbeat();
-            arduinoConnected = true;
-            setState(() => _selectedArduinoPort = port);
-
-            // 清除測試數據
-            _dataStorage.clearAllData();
-          } else {
-            // 不是 Arduino，關閉連接，嘗試下一個
-            _arduinoManager.close();
-          }
-        }
-
-        // 短暫延遲再嘗試下一個
-        if (!arduinoConnected && i < portsToTry.length - 1) {
-          await Future.delayed(const Duration(milliseconds: 200));
-        }
-      }
-
-      if (!arduinoConnected) {
-        _showSnackBar(tr('arduino_connect_failed'));
-        return false;
-      }
-
-      // Arduino 連接成功，發送 flowoff
-      await Future.delayed(const Duration(milliseconds: 300));
-      _sendArduinoFlowoff();
-    }
-
-    // ===== 第二階段：連接 STM32 =====
-    if (!_urManager.isConnected) {
-      _updateAutoDetectionStatus(tr('connecting_stm32'), 0.08);
-
-      // 取得剩餘可用的 COM 埠（排除 Arduino 使用的）
-      final availableForStm32 = _availablePorts
-          .where((p) => p != _arduinoManager.currentPortName)
-          .toList();
-
-      if (availableForStm32.isEmpty) {
-        _showSnackBar(tr('usb_not_connected'));
-        return false;
-      }
-
-      // 建立要嘗試的 COM 埠列表
-      final portsToTry = <String>[];
-      if (_selectedUrPort != null && availableForStm32.contains(_selectedUrPort)) {
-        portsToTry.add(_selectedUrPort!);
-        portsToTry.addAll(availableForStm32.where((p) => p != _selectedUrPort));
-      } else {
-        portsToTry.addAll(availableForStm32);
-      }
-
-      bool stm32Connected = false;
-
-      // 逐一嘗試每個 COM 埠
-      for (int i = 0; i < portsToTry.length && !stm32Connected; i++) {
-        if (_autoDetectionCancelled) return false;
-
-        final port = portsToTry[i];
-        _updateAutoDetectionStatus(
-          '${tr('connecting_stm32')} ($port, ${i + 1}/${portsToTry.length})',
-          0.08 + (i * 0.02)
-        );
-
-        // 嘗試開啟連接埠
-        if (_urManager.open(port)) {
-          // 發送韌體版本查詢來驗證是否為 STM32
-          final payload = [0x05, 0x00, 0x00, 0x00, 0x00];
-          final cmd = URCommandBuilder.buildCommand(payload);
-          _urManager.sendHex(cmd);
-
-          // 等待驗證回應
-          await Future.delayed(const Duration(milliseconds: 1500));
-
-          if (_urManager.firmwareVersionNotifier.value != null) {
-            // 確認是 STM32，連接成功
-            _urManager.startHeartbeat();
-            stm32Connected = true;
-            setState(() => _selectedUrPort = port);
-          } else {
-            // 不是 STM32，關閉連接，嘗試下一個
-            _urManager.close();
-          }
-        }
-
-        // 短暫延遲再嘗試下一個
-        if (!stm32Connected && i < portsToTry.length - 1) {
-          await Future.delayed(const Duration(milliseconds: 200));
-        }
-      }
-
-      if (!stm32Connected) {
-        _showSnackBar(tr('stm32_connect_failed'));
-        return false;
-      }
-    }
-
-    // 確認兩者都已連接
-    return _arduinoManager.isConnected && _urManager.isConnected;
-  }
-
-  /// 步驟 2: 讀取無動作狀態 (Idle)
-  Future<bool> _autoDetectionStep2ReadIdle() async {
-    const maxRetries = 3;
-
-    // 發送關閉全部 GPIO 指令
-    final closePayload = [0x02, 0xFF, 0xFF, 0x03, 0x00];
-    _sendUrCommand(closePayload);
-    await Future.delayed(const Duration(milliseconds: 500));
-
-    for (int retry = 0; retry < maxRetries; retry++) {
-      if (_autoDetectionCancelled) return false;
-
-      if (retry > 0) {
-        _updateAutoDetectionStatus(
-          tr('retry_step').replaceAll('{current}', '$retry').replaceAll('{max}', '$maxRetries'),
-          0.20
-        );
-        await Future.delayed(const Duration(milliseconds: 500));
-      }
-
-      // 同時讀取 Arduino 和 STM32 硬體數據 (ID 0-17)
-      _updateAutoDetectionStatus(tr('reading_hardware_data'), 0.20);
-      await _batchReadHardwareParallel(HardwareState.idle);
-
-      // 檢查是否所有 ID 都有數據
-      bool allDataReceived = true;
-      for (int id = 0; id < 18; id++) {
-        if (_dataStorage.getArduinoLatestIdleData(id) == null ||
-            _dataStorage.getStm32LatestIdleData(id) == null) {
-          allDataReceived = false;
-          break;
-        }
-      }
-
-      if (allDataReceived) return true;
-    }
-
-    return false;
-  }
-
-  /// 步驟 3: 讀取動作中狀態 (Running)
-  Future<bool> _autoDetectionStep3ReadRunning() async {
-    const maxRetries = 3;
-
-    // 發送開啟全部 GPIO 指令
-    final openPayload = [0x01, 0xFF, 0xFF, 0x03, 0x00];
-    _sendUrCommand(openPayload);
-    await Future.delayed(const Duration(milliseconds: 500));
-
-    for (int retry = 0; retry < maxRetries; retry++) {
-      if (_autoDetectionCancelled) return false;
-
-      if (retry > 0) {
-        _updateAutoDetectionStatus(
-          tr('retry_step').replaceAll('{current}', '$retry').replaceAll('{max}', '$maxRetries'),
-          0.40
-        );
-        await Future.delayed(const Duration(milliseconds: 500));
-      }
-
-      // 同時讀取 Arduino 和 STM32 硬體數據 (ID 0-17)
-      _updateAutoDetectionStatus(tr('reading_hardware_data'), 0.38);
-      await _batchReadHardwareParallel(HardwareState.running);
-
-      // 檢查是否所有 ID 都有數據
-      bool allDataReceived = true;
-      for (int id = 0; id < 18; id++) {
-        if (_dataStorage.getArduinoLatestRunningData(id) == null ||
-            _dataStorage.getStm32LatestRunningData(id) == null) {
-          allDataReceived = false;
-          break;
-        }
-      }
-
-      if (allDataReceived) return true;
-    }
-
-    return false;
-  }
-
-  /// 步驟 4: 關閉 GPIO
-  Future<void> _autoDetectionStep4CloseGpio() async {
-    // 發送關閉全部 GPIO 指令
-    final closePayload = [0x02, 0xFF, 0xFF, 0x03, 0x00];
-    _sendUrCommand(closePayload);
-    await Future.delayed(const Duration(milliseconds: 500));
-  }
-
-  /// 步驟 5: 感測器測試
-  Future<bool> _autoDetectionStep5SensorTest() async {
-    // ===== 第一階段：先讀取溫度和壓力感測器（不含流量計）=====
-    _updateAutoDetectionStatus(tr('auto_detection_step_sensor'), 0.68);
-
-    // 先讀取 Arduino 溫度和壓力 (ID 19-21)
-    if (_arduinoManager.isConnected) {
-      for (int id = 19; id <= 21; id++) {
-        if (_autoDetectionCancelled) return false;
-        // 設定感測器區域高亮
-        setState(() {
-          _currentReadingId = id;
-          _currentReadingSection = 'sensor';
-        });
-        _dataStorage.setHardwareState(id, HardwareState.running);
-        _arduinoManager.sendString(_getArduinoSensorCommand(id));
-        await Future.delayed(const Duration(milliseconds: 400));
-      }
-    }
-
-    // 讀取 STM32 溫度和壓力 (ID 19-23)
-    // 使用 1000ms 間隔（與資料儲存頁面一致），確保溫度感測器有足夠時間回應
-    if (_urManager.isConnected) {
-      for (int id = 19; id <= 23; id++) {
-        if (_autoDetectionCancelled) return false;
-        // 設定感測器區域高亮
-        setState(() {
-          _currentReadingId = id;
-          _currentReadingSection = 'sensor';
-        });
-        _dataStorage.setHardwareState(id, HardwareState.running);
-        final payload = [0x03, id, 0x00, 0x00, 0x00];
-        final cmd = URCommandBuilder.buildCommand(payload);
-        _urManager.sendHex(cmd);
-        await Future.delayed(const Duration(milliseconds: 1000));
-      }
-    }
-
-    // 額外等待確保溫度數據都收到
-    await Future.delayed(const Duration(milliseconds: 500));
-
-    // ===== 第二階段：流量計測試 =====
-    // 發送 flowon 啟動流量計
-    _updateAutoDetectionStatus(tr('starting_flow_test'), 0.75);
-    // 設定流量計高亮 (ID 18)
-    setState(() {
-      _currentReadingId = 18;
-      _currentReadingSection = 'sensor';
-    });
-    if (_arduinoManager.isConnected) {
-      _arduinoManager.sendString('flowon');
-    }
-
-    // 等待流量計啟動
-    await Future.delayed(const Duration(milliseconds: 500));
-
-    // 讀取流量計數據 3 次，每次間隔 1 秒
-    for (int i = 0; i < 3; i++) {
-      if (_autoDetectionCancelled) return false;
-
-      _updateAutoDetectionStatus(tr('auto_detection_step_sensor'), 0.76 + i * 0.02);
-
-      // 保持流量計高亮
-      setState(() {
-        _currentReadingId = 18;
-        _currentReadingSection = 'sensor';
-      });
-
-      // Arduino 流量計讀取 (ID 18)
-      if (_arduinoManager.isConnected) {
-        _dataStorage.setHardwareState(18, HardwareState.running);
-        _arduinoManager.sendString('flowon');  // flowon 同時讀取流量
-        await Future.delayed(const Duration(milliseconds: 300));
-      }
-
-      // STM32 流量計讀取 (ID 18)
-      if (_urManager.isConnected) {
-        _dataStorage.setHardwareState(18, HardwareState.running);
-        final payload = [0x03, 18, 0x00, 0x00, 0x00];
-        final cmd = URCommandBuilder.buildCommand(payload);
-        _urManager.sendHex(cmd);
-        await Future.delayed(const Duration(milliseconds: 300));
-      }
-
-      if (i < 2) {
-        await Future.delayed(const Duration(milliseconds: 700));
-      }
-    }
-
-    // 清除高亮
-    setState(() {
-      _currentReadingId = null;
-      _currentReadingSection = null;
-    });
-
-    // 發送 flowoff 停止流量計
-    _updateAutoDetectionStatus(tr('stopping_flow_test'), 0.82);
-    if (_arduinoManager.isConnected) {
-      _arduinoManager.sendString('flowoff');
-    }
-
-    await Future.delayed(const Duration(milliseconds: 500));
-
-    // 讀取最終流量計數值
-    if (_urManager.isConnected) {
-      final readPayload = [0x03, 18, 0x00, 0x00, 0x00];
-      final readCmd = URCommandBuilder.buildCommand(readPayload);
-      _urManager.sendHex(readCmd);
-    }
-
-    await Future.delayed(const Duration(milliseconds: 300));
-
-    // 清除流量計
-    if (_urManager.isConnected) {
-      final clearPayload = [0x04, 0x12, 0x00, 0x00, 0x00];
-      _sendUrCommand(clearPayload);
-    }
-
-    return true;
-  }
-
-  /// 取得 Arduino 感測器指令
-  String _getArduinoSensorCommand(int id) {
-    switch (id) {
-      case 19: return 'prec';      // PressureCO2
-      case 20: return 'prew';      // PressureWater
-      case 21: return 'mcutemp';   // MCUtemp
-      default: return '';
-    }
-  }
-
-  /// 步驟 6: 顯示結果
-  /// 使用 ThresholdSettingsService 進行範圍驗證
-  /// - 硬體 (ID 0-17): Arduino 和 STM32 測量同一元件，任一異常則該項目異常
-  /// - 感測器 (ID 18-23): 驗證各設備的感測器數值是否在設定範圍內
-  ///   - 溫度感測器 (ID 21-23) 需要額外的溫差比對
-  void _autoDetectionStep6ShowResult() {
-    final failedIdleItems = <String>[];      // Idle 異常項目
-    final failedRunningItems = <String>[];   // Running 異常項目
-    final failedSensorItems = <String>[];    // 感測器異常項目
-    final thresholdService = ThresholdSettingsService();
-
-    // 檢查硬體數據 (ID 0-17) - Idle 狀態
-    // Arduino 和 STM32 測量同一元件，任一異常則該項目異常
-    for (int id = 0; id < 18; id++) {
-      final arduinoData = _dataStorage.getArduinoLatestIdleData(id);
-      final stm32Data = _dataStorage.getStm32LatestIdleData(id);
-
-      bool hasError = false;
-
-      // 驗證 Arduino Idle 數值
-      if (arduinoData != null) {
-        final isValid = thresholdService.validateHardwareValue(
-          DeviceType.arduino, StateType.idle, id, arduinoData.value);
-        if (!isValid) hasError = true;
-      }
-
-      // 驗證 STM32 Idle 數值
-      if (stm32Data != null) {
-        final isValid = thresholdService.validateHardwareValue(
-          DeviceType.stm32, StateType.idle, id, stm32Data.value);
-        if (!isValid) hasError = true;
-      }
-
-      // 只要有一個異常，記錄該項目
-      if (hasError) {
-        failedIdleItems.add(DisplayNames.getName(id));
-      }
-    }
-
-    // 檢查硬體數據 (ID 0-17) - Running 狀態
-    for (int id = 0; id < 18; id++) {
-      final arduinoData = _dataStorage.getArduinoLatestRunningData(id);
-      final stm32Data = _dataStorage.getStm32LatestRunningData(id);
-
-      bool hasError = false;
-
-      // 驗證 Arduino Running 數值
-      if (arduinoData != null) {
-        final isValid = thresholdService.validateHardwareValue(
-          DeviceType.arduino, StateType.running, id, arduinoData.value);
-        if (!isValid) hasError = true;
-      }
-
-      // 驗證 STM32 Running 數值
-      if (stm32Data != null) {
-        final isValid = thresholdService.validateHardwareValue(
-          DeviceType.stm32, StateType.running, id, stm32Data.value);
-        if (!isValid) hasError = true;
-      }
-
-      // 只要有一個異常，記錄該項目
-      if (hasError) {
-        failedRunningItems.add(DisplayNames.getName(id));
-      }
-    }
-
-    // 檢查感測器數據 (ID 18-23)
-    final checkedSensorIds = <int>{};
-
-    // 先取得 Arduino MCUtemp (ID 21) 用於溫度比對
-    int? arduinoMcuTemp;
-    {
-      final runningData = _dataStorage.getArduinoLatestRunningData(21);
-      final idleData = _dataStorage.getArduinoLatestIdleData(21);
-      final data = runningData ?? idleData;
-      if (data != null) {
-        arduinoMcuTemp = data.value ~/ 10;  // MCUtemp 需要除以 10
-      }
-    }
-
-    // Arduino 感測器 (ID 18-20) - 非溫度類
-    for (int id = 18; id <= 20; id++) {
-      final arduinoRunningData = _dataStorage.getArduinoLatestRunningData(id);
-      final arduinoIdleData = _dataStorage.getArduinoLatestIdleData(id);
-      final arduinoData = arduinoRunningData ?? arduinoIdleData;
-
-      final stm32RunningData = _dataStorage.getStm32LatestRunningData(id);
-      final stm32IdleData = _dataStorage.getStm32LatestIdleData(id);
-      final stm32Data = stm32RunningData ?? stm32IdleData;
-
-      bool hasError = false;
-
-      if (arduinoData != null) {
-        final isValid = thresholdService.validateSensorValue(DeviceType.arduino, id, arduinoData.value);
-        if (!isValid) hasError = true;
-      }
-
-      if (stm32Data != null) {
-        final isValid = thresholdService.validateSensorValue(DeviceType.stm32, id, stm32Data.value);
-        if (!isValid) hasError = true;
-      }
-
-      if (hasError && !checkedSensorIds.contains(id)) {
-        checkedSensorIds.add(id);
-        failedSensorItems.add(DisplayNames.getName(id));
-      }
-    }
-
-    // 溫度感測器 (ID 21-23) - 需要分別檢查並顯示詳細資訊
-    for (int id = 21; id <= 23; id++) {
-      final stm32RunningData = _dataStorage.getStm32LatestRunningData(id);
-      final stm32IdleData = _dataStorage.getStm32LatestIdleData(id);
-      final stm32Data = stm32RunningData ?? stm32IdleData;
-
-      bool hasError = false;
-      String errorDetail = '';
-
-      // ID 21 (MCUtemp) Arduino 也有
-      if (id == 21) {
-        final arduinoRunningData = _dataStorage.getArduinoLatestRunningData(id);
-        final arduinoIdleData = _dataStorage.getArduinoLatestIdleData(id);
-        final arduinoData = arduinoRunningData ?? arduinoIdleData;
-
-        if (arduinoData != null) {
-          final value = arduinoData.value ~/ 10;
-          final isValid = thresholdService.validateSensorValue(DeviceType.arduino, id, value);
-          if (!isValid) {
-            hasError = true;
-            errorDetail = 'Arduino: $value°C';
-          }
-        }
-      }
-
-      if (stm32Data != null) {
-        final isValid = thresholdService.validateSensorValue(DeviceType.stm32, id, stm32Data.value);
-        if (!isValid) {
-          hasError = true;
-          if (errorDetail.isNotEmpty) errorDetail += ', ';
-          errorDetail += 'STM32: ${stm32Data.value}°C';
-        }
-
-        // 與 Arduino MCUtemp 溫差比對
-        if (arduinoMcuTemp != null) {
-          final diffThreshold = thresholdService.getDiffThreshold(id);
-          final tempDiff = (arduinoMcuTemp - stm32Data.value).abs();
-          if (tempDiff > diffThreshold) {
-            hasError = true;
-            if (errorDetail.isNotEmpty) errorDetail += ', ';
-            errorDetail += '溫差$tempDiff°C';
-          }
-        }
-      }
-
-      if (hasError && !checkedSensorIds.contains(id)) {
-        checkedSensorIds.add(id);
-        final name = DisplayNames.getName(id);
-        failedSensorItems.add(errorDetail.isNotEmpty ? '$name ($errorDetail)' : name);
-      }
-    }
-
-    // 顯示結果對話框
-    final passed = failedIdleItems.isEmpty && failedRunningItems.isEmpty && failedSensorItems.isEmpty;
-    _showTestResultDialog(passed, failedIdleItems, failedRunningItems, failedSensorItems);
-  }
+  // ==================== 測試結果對話框 (由 AutoDetectionController 調用) ====================
 
   /// 顯示測試結果對話框
   /// 三欄顯示：左邊 Idle、中間 Running、右邊感測器
@@ -1990,85 +1279,6 @@ class _MainNavigationPageState extends State<MainNavigationPage> {
     );
   }
 
-  /// 並行批次讀取 Arduino 和 STM32 硬體數據 (ID 0-17)
-  /// 兩邊同時發送指令，減少總讀取時間
-  Future<void> _batchReadHardwareParallel(HardwareState state) async {
-    // Arduino 指令對應表
-    final arduinoCommands = ['s0', 's1', 's2', 's3', 's4', 's5', 's6', 's7', 's8', 's9',
-                             'water', 'u0', 'u1', 'u2', 'arl', 'crl', 'srl', 'o3'];
-
-    // 設定當前讀取的區域類型
-    final sectionName = state == HardwareState.idle ? 'idle' : 'running';
-
-    for (int id = 0; id < 18; id++) {
-      if (_autoDetectionCancelled) return;
-
-      // 設定當前讀取的項目 ID 和區域（用於高亮顯示）
-      setState(() {
-        _currentReadingId = id;
-        _currentReadingSection = sectionName;
-      });
-
-      // 設定當前硬體狀態
-      _dataStorage.setHardwareState(id, state);
-
-      // 同時發送 Arduino 和 STM32 指令
-      if (_arduinoManager.isConnected) {
-        _arduinoManager.sendString(arduinoCommands[id]);
-      }
-      if (_urManager.isConnected) {
-        final payload = [0x03, id, 0x00, 0x00, 0x00];
-        final cmd = URCommandBuilder.buildCommand(payload);
-        _urManager.sendHex(cmd);
-      }
-
-      // 等待回應
-      await Future.delayed(const Duration(milliseconds: 300));
-    }
-
-    // 讀取完成後清除高亮
-    setState(() {
-      _currentReadingId = null;
-      _currentReadingSection = null;
-    });
-  }
-
-  /// 批次讀取 Arduino 感測器數據 (ID 18-21)
-  Future<void> _batchReadArduinoSensor() async {
-    if (!_arduinoManager.isConnected) return;
-
-    final commands = ['flowon', 'prec', 'prew', 'mcutemp'];
-    final ids = [18, 19, 20, 21];
-
-    for (int i = 0; i < commands.length; i++) {
-      if (_autoDetectionCancelled) return;
-
-      _dataStorage.setHardwareState(ids[i], HardwareState.running);
-      _arduinoManager.sendString(commands[i]);
-      await Future.delayed(const Duration(milliseconds: 300));
-    }
-  }
-
-  /// 批次讀取 STM32 感測器數據 (ID 18-23)
-  Future<void> _batchReadStm32Sensor() async {
-    if (!_urManager.isConnected) return;
-
-    for (int id = 18; id <= 23; id++) {
-      if (_autoDetectionCancelled) return;
-
-      _dataStorage.setHardwareState(id, HardwareState.running);
-
-      final payload = [0x03, id, 0x00, 0x00, 0x00];
-      final cmd = URCommandBuilder.buildCommand(payload);
-      _urManager.sendHex(cmd);
-      // 增加等待時間確保 STM32 有足夠時間回應
-      await Future.delayed(const Duration(milliseconds: 400));
-    }
-    // 額外等待確保最後一個回應也被接收
-    
-    await Future.delayed(const Duration(milliseconds: 300));
-  }
-
   /// 建構自動檢測流程頁面
   Widget _buildAutoDetectionPage() {
     return AutoDetectionPage(
@@ -2085,13 +1295,13 @@ class _MainNavigationPageState extends State<MainNavigationPage> {
       onStm32PortChanged: (port) {
         setState(() => _selectedUrPort = port);
       },
-      onArduinoConnect: _connectArduino,
-      onArduinoDisconnect: _disconnectArduino,
-      onStm32Connect: _connectUr,
-      onStm32Disconnect: _disconnectUr,
+      onArduinoConnect: connectArduino,
+      onArduinoDisconnect: disconnectArduino,
+      onStm32Connect: connectUr,
+      onStm32Disconnect: disconnectUr,
       onRefreshPorts: _refreshPorts,
       // 自動檢測相關
-      onStartAutoDetection: _startAutoDetection,
+      onStartAutoDetection: startAutoDetection,
       isAutoDetecting: _isAutoDetecting,
       autoDetectionStatus: _autoDetectionStatus,
       autoDetectionProgress: _autoDetectionProgress,
@@ -2133,7 +1343,7 @@ class _MainNavigationPageState extends State<MainNavigationPage> {
     // 燒入前先斷開 STM32 串口連線
     if (_urManager.isConnected) {
       _showSnackBar(tr('disconnecting_stm32_for_program'));
-      _disconnectUr();
+      disconnectUr();
       await Future.delayed(const Duration(milliseconds: 300));
     }
 
@@ -2176,10 +1386,10 @@ class _MainNavigationPageState extends State<MainNavigationPage> {
         setState(() {
           _programStatus = tr('waiting_stm32_startup');
         });
-        await Future.delayed(const Duration(milliseconds: 5000));
+        await Future.delayed(const Duration(milliseconds: 8000));
 
         // 開始自動檢測流程
-        _startAutoDetection();
+        startAutoDetection();
       } else {
         // 燒入失敗，顯示錯誤訊息
         String message;
@@ -2198,36 +1408,4 @@ class _MainNavigationPageState extends State<MainNavigationPage> {
     }
   }
 
-  /// STM32 發送原始指令 (直接發送完整 hex 指令)
-  void _onStm32SendCommand(List<int> hexCommand) {
-    if (!_urManager.isConnected) {
-      _showSnackBar(tr('connect_stm32_first'));
-      return;
-    }
-    _urManager.sendHex(hexCommand);
-
-    // 從指令中解析出 payload 以追蹤硬體狀態
-    // 指令格式: 40 71 30 [CMD] [LOW] [MID] [HIGH] [00] [CS]
-    if (hexCommand.length >= 8 && hexCommand[0] == 0x40 && hexCommand[1] == 0x71 && hexCommand[2] == 0x30) {
-      final command = hexCommand[3];
-      if (command == 0x01 || command == 0x02) {
-        final lowByte = hexCommand[4];
-        final midByte = hexCommand[5];
-        final highByte = hexCommand[6];
-        final bitMask = lowByte | (midByte << 8) | (highByte << 16);
-
-        for (int id = 0; id < 24; id++) {
-          if ((bitMask & (1 << id)) != 0) {
-            final state = (command == 0x01)
-                ? HardwareState.running
-                : HardwareState.idle;
-            _dataStorage.setHardwareState(id, state);
-          }
-        }
-
-        final action = (command == 0x01) ? tr('output_opened') : tr('output_closed');
-        _showSnackBar(tr('all_outputs_toggled').replaceAll('{action}', action));
-      }
-    }
-  }
 }

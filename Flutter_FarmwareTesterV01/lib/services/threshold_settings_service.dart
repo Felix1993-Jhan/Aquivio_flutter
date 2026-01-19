@@ -151,8 +151,8 @@ class ThresholdSettingsService {
   /// Arduino 感測器預設範圍 (ID 18-21)
   static const Map<int, ThresholdRange> _defaultArduinoSensor = {
     18: ThresholdRange(min: 0, max: 10000),    // Flow
-    19: ThresholdRange(min: 200, max: 260),    // PressureCO2
-    20: ThresholdRange(min: 200, max: 260),    // PressureWater
+    19: ThresholdRange(min: 190, max: 260),    // PressureCO2
+    20: ThresholdRange(min: 190, max: 260),    // PressureWater
     21: ThresholdRange(min: -20, max: 100),    // MCUtemp (除以10後，溫度範圍 -20~100)
   };
 

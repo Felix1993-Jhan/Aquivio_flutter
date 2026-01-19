@@ -115,6 +115,20 @@ class _DataStoragePageState extends State<DataStoragePage> {
   /// 批次讀取計時器
   Timer? _batchReadTimer;
 
+  // ==================== 當前讀取標示（四大區塊獨立） ====================
+
+  /// Arduino 硬體區當前正在讀取的 ID
+  int? _arduinoHardwareReadingId;
+
+  /// Arduino 感測器區當前正在讀取的 ID
+  int? _arduinoSensorReadingId;
+
+  /// STM32 硬體區當前正在讀取的 ID
+  int? _stm32HardwareReadingId;
+
+  /// STM32 感測器區當前正在讀取的 ID
+  int? _stm32SensorReadingId;
+
   @override
   void dispose() {
     _batchReadTimer?.cancel();
@@ -123,28 +137,52 @@ class _DataStoragePageState extends State<DataStoragePage> {
 
   // ==================== 批次讀取方法 ====================
 
-  /// Arduino 硬體區一鍵讀取 (ID 0-17, 間隔 300ms)
+  /// 重試最大次數
+  static const int _maxRetries = 3;
+
+  /// Arduino 硬體區一鍵讀取 (ID 0-17, 間隔 300ms，含重試機制)
   void _startArduinoHardwareBatchRead() async {
     if (_isArduinoHardwareBatchReading || widget.onArduinoQuickRead == null) return;
 
     setState(() => _isArduinoHardwareBatchReading = true);
+
+    // 檢查當前硬體狀態，決定要檢查 Idle 還是 Running 數據
+    final checkRunning = widget.dataStorage.isHardwareRunning(0);
 
     for (int id = 0; id <= 17; id++) {
       if (!_isArduinoHardwareBatchReading) break; // 允許中途取消
 
       final command = _getArduinoReadCommand(id);
       if (command != null) {
-        widget.onArduinoQuickRead!(command);
-        await Future.delayed(const Duration(milliseconds: 300));
+        // 重試機制：最多重試 _maxRetries 次
+        for (int retry = 0; retry <= _maxRetries; retry++) {
+          if (!_isArduinoHardwareBatchReading) break;
+
+          setState(() => _arduinoHardwareReadingId = id);
+          widget.onArduinoQuickRead!(command);
+          await Future.delayed(const Duration(milliseconds: 300));
+
+          // 檢查是否收到數據
+          final data = checkRunning
+              ? widget.dataStorage.getArduinoLatestRunningData(id)
+              : widget.dataStorage.getArduinoLatestIdleData(id);
+
+          if (data != null || retry >= _maxRetries) break;
+          // 數據為 null，等待後重試
+          await Future.delayed(const Duration(milliseconds: 100));
+        }
       }
     }
 
     if (mounted) {
-      setState(() => _isArduinoHardwareBatchReading = false);
+      setState(() {
+        _isArduinoHardwareBatchReading = false;
+        _arduinoHardwareReadingId = null;
+      });
     }
   }
 
-  /// Arduino 感測器區一鍵讀取 (ID 18-21, 間隔 1000ms)
+  /// Arduino 感測器區一鍵讀取 (ID 18-21, 間隔 1000ms，含重試機制)
   void _startArduinoSensorBatchRead() async {
     if (_isArduinoSensorBatchReading || widget.onArduinoQuickRead == null) return;
 
@@ -155,35 +193,74 @@ class _DataStoragePageState extends State<DataStoragePage> {
 
       final command = _getArduinoReadCommand(id);
       if (command != null) {
-        widget.onArduinoQuickRead!(command);
-        await Future.delayed(const Duration(milliseconds: 1000));
+        // 重試機制：最多重試 _maxRetries 次
+        for (int retry = 0; retry <= _maxRetries; retry++) {
+          if (!_isArduinoSensorBatchReading) break;
+
+          setState(() => _arduinoSensorReadingId = id);
+          widget.onArduinoQuickRead!(command);
+          await Future.delayed(const Duration(milliseconds: 1000));
+
+          // 檢查是否收到數據（感測器不區分狀態，取最新的）
+          final runningData = widget.dataStorage.getArduinoLatestRunningData(id);
+          final idleData = widget.dataStorage.getArduinoLatestIdleData(id);
+          final data = runningData ?? idleData;
+
+          if (data != null || retry >= _maxRetries) break;
+          // 數據為 null，等待後重試
+          await Future.delayed(const Duration(milliseconds: 200));
+        }
       }
     }
 
     if (mounted) {
-      setState(() => _isArduinoSensorBatchReading = false);
+      setState(() {
+        _isArduinoSensorBatchReading = false;
+        _arduinoSensorReadingId = null;
+      });
     }
   }
 
-  /// STM32 硬體區一鍵讀取 (ID 0-17, 間隔 300ms)
+  /// STM32 硬體區一鍵讀取 (ID 0-17, 間隔 300ms，含重試機制)
   void _startStm32HardwareBatchRead() async {
     if (_isStm32HardwareBatchReading || widget.onStm32QuickRead == null) return;
 
     setState(() => _isStm32HardwareBatchReading = true);
 
+    // 檢查當前硬體狀態，決定要檢查 Idle 還是 Running 數據
+    final checkRunning = widget.dataStorage.isHardwareRunning(0);
+
     for (int id = 0; id <= 17; id++) {
       if (!_isStm32HardwareBatchReading) break;
 
-      widget.onStm32QuickRead!(id);
-      await Future.delayed(const Duration(milliseconds: 300));
+      // 重試機制：最多重試 _maxRetries 次
+      for (int retry = 0; retry <= _maxRetries; retry++) {
+        if (!_isStm32HardwareBatchReading) break;
+
+        setState(() => _stm32HardwareReadingId = id);
+        widget.onStm32QuickRead!(id);
+        await Future.delayed(const Duration(milliseconds: 300));
+
+        // 檢查是否收到數據
+        final data = checkRunning
+            ? widget.dataStorage.getStm32LatestRunningData(id)
+            : widget.dataStorage.getStm32LatestIdleData(id);
+
+        if (data != null || retry >= _maxRetries) break;
+        // 數據為 null，等待後重試
+        await Future.delayed(const Duration(milliseconds: 100));
+      }
     }
 
     if (mounted) {
-      setState(() => _isStm32HardwareBatchReading = false);
+      setState(() {
+        _isStm32HardwareBatchReading = false;
+        _stm32HardwareReadingId = null;
+      });
     }
   }
 
-  /// STM32 感測器區一鍵讀取 (ID 18-23, 間隔 1000ms)
+  /// STM32 感測器區一鍵讀取 (ID 18-23, 間隔 1000ms，含重試機制)
   void _startStm32SensorBatchRead() async {
     if (_isStm32SensorBatchReading || widget.onStm32QuickRead == null) return;
 
@@ -192,12 +269,30 @@ class _DataStoragePageState extends State<DataStoragePage> {
     for (int id = 18; id <= 23; id++) {
       if (!_isStm32SensorBatchReading) break;
 
-      widget.onStm32QuickRead!(id);
-      await Future.delayed(const Duration(milliseconds: 1000));
+      // 重試機制：最多重試 _maxRetries 次
+      for (int retry = 0; retry <= _maxRetries; retry++) {
+        if (!_isStm32SensorBatchReading) break;
+
+        setState(() => _stm32SensorReadingId = id);
+        widget.onStm32QuickRead!(id);
+        await Future.delayed(const Duration(milliseconds: 1000));
+
+        // 檢查是否收到數據（感測器不區分狀態，取最新的）
+        final runningData = widget.dataStorage.getStm32LatestRunningData(id);
+        final idleData = widget.dataStorage.getStm32LatestIdleData(id);
+        final data = runningData ?? idleData;
+
+        if (data != null || retry >= _maxRetries) break;
+        // 數據為 null，等待後重試
+        await Future.delayed(const Duration(milliseconds: 200));
+      }
     }
 
     if (mounted) {
-      setState(() => _isStm32SensorBatchReading = false);
+      setState(() {
+        _isStm32SensorBatchReading = false;
+        _stm32SensorReadingId = null;
+      });
     }
   }
 
@@ -208,6 +303,10 @@ class _DataStoragePageState extends State<DataStoragePage> {
       _isArduinoSensorBatchReading = false;
       _isStm32HardwareBatchReading = false;
       _isStm32SensorBatchReading = false;
+      _arduinoHardwareReadingId = null;
+      _arduinoSensorReadingId = null;
+      _stm32HardwareReadingId = null;
+      _stm32SensorReadingId = null;
     });
   }
 
@@ -530,16 +629,27 @@ class _DataStoragePageState extends State<DataStoragePage> {
     final showQuickRead = (state == HardwareState.running && isRunning) ||
                           (state == HardwareState.idle && !isRunning);
 
+    // 判斷當前項目是否正在被讀取（用於高亮顯示）
+    // 根據硬體狀態決定哪一欄應該高亮：
+    // - 硬體 Running 狀態 → 只高亮 Running 欄
+    // - 硬體 Idle 狀態 → 只高亮 Idle 欄
+    final isCurrentlyReading = _arduinoHardwareReadingId == id && showQuickRead;
+
     return Container(
       margin: const EdgeInsets.only(bottom: 3),
       padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 3),
       decoration: BoxDecoration(
-        color: data != null ? Colors.white : Colors.grey.shade200,
+        color: isCurrentlyReading
+            ? Colors.yellow.shade200
+            : (data != null ? Colors.white : Colors.grey.shade200),
         borderRadius: BorderRadius.circular(4),
         border: Border.all(
-          color: data != null
-              ? EmeraldColors.primary.withValues(alpha: 0.5)
-              : Colors.grey.shade400,
+          color: isCurrentlyReading
+              ? Colors.orange.shade400
+              : (data != null
+                  ? EmeraldColors.primary.withValues(alpha: 0.5)
+                  : Colors.grey.shade400),
+          width: isCurrentlyReading ? 2 : 1,
         ),
       ),
       child: Row(
@@ -547,12 +657,25 @@ class _DataStoragePageState extends State<DataStoragePage> {
           // ID 和名稱
           SizedBox(
             width: 70,
-            child: Text(
-              name,
-              style: TextStyle(
-                fontWeight: FontWeight.bold,
-                fontSize: 10,
-                color: data != null ? Colors.black : Colors.grey,
+            child: Container(
+              padding: isCurrentlyReading
+                  ? const EdgeInsets.symmetric(horizontal: 4, vertical: 1)
+                  : EdgeInsets.zero,
+              decoration: isCurrentlyReading
+                  ? BoxDecoration(
+                      color: Colors.orange.shade300,
+                      borderRadius: BorderRadius.circular(3),
+                    )
+                  : null,
+              child: Text(
+                name,
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 10,
+                  color: isCurrentlyReading
+                      ? Colors.white
+                      : (data != null ? Colors.black : Colors.grey),
+                ),
               ),
             ),
           ),
@@ -610,16 +733,24 @@ class _DataStoragePageState extends State<DataStoragePage> {
     final idleData = widget.dataStorage.getArduinoLatestIdleData(id);
     final data = runningData ?? idleData;
 
+    // 判斷當前項目是否正在被讀取（用於高亮顯示）
+    final isCurrentlyReading = _arduinoSensorReadingId == id;
+
     return Container(
       margin: const EdgeInsets.only(bottom: 4),
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
       decoration: BoxDecoration(
-        color: data != null ? Colors.white : Colors.grey.shade200,
+        color: isCurrentlyReading
+            ? Colors.yellow.shade200
+            : (data != null ? Colors.white : Colors.grey.shade200),
         borderRadius: BorderRadius.circular(4),
         border: Border.all(
-          color: data != null
-              ? EmeraldColors.primary.withValues(alpha: 0.5)
-              : Colors.grey.shade400,
+          color: isCurrentlyReading
+              ? Colors.orange.shade400
+              : (data != null
+                  ? EmeraldColors.primary.withValues(alpha: 0.5)
+                  : Colors.grey.shade400),
+          width: isCurrentlyReading ? 2 : 1,
         ),
       ),
       child: Row(
@@ -627,12 +758,25 @@ class _DataStoragePageState extends State<DataStoragePage> {
           // ID 和名稱
           SizedBox(
             width: 100,
-            child: Text(
-              name,
-              style: TextStyle(
-                fontWeight: FontWeight.bold,
-                fontSize: 12,
-                color: data != null ? Colors.black : Colors.grey,
+            child: Container(
+              padding: isCurrentlyReading
+                  ? const EdgeInsets.symmetric(horizontal: 4, vertical: 2)
+                  : EdgeInsets.zero,
+              decoration: isCurrentlyReading
+                  ? BoxDecoration(
+                      color: Colors.orange.shade300,
+                      borderRadius: BorderRadius.circular(3),
+                    )
+                  : null,
+              child: Text(
+                name,
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 12,
+                  color: isCurrentlyReading
+                      ? Colors.white
+                      : (data != null ? Colors.black : Colors.grey),
+                ),
               ),
             ),
           ),
@@ -866,16 +1010,27 @@ class _DataStoragePageState extends State<DataStoragePage> {
     final showQuickRead = (state == HardwareState.running && isRunning) ||
                           (state == HardwareState.idle && !isRunning);
 
+    // 判斷當前項目是否正在被讀取（用於高亮顯示）
+    // 根據硬體狀態決定哪一欄應該高亮：
+    // - 硬體 Running 狀態 → 只高亮 Running 欄
+    // - 硬體 Idle 狀態 → 只高亮 Idle 欄
+    final isCurrentlyReading = _stm32HardwareReadingId == id && showQuickRead;
+
     return Container(
       margin: const EdgeInsets.only(bottom: 3),
       padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 3),
       decoration: BoxDecoration(
-        color: data != null ? Colors.white : Colors.grey.shade200,
+        color: isCurrentlyReading
+            ? Colors.yellow.shade200
+            : (data != null ? Colors.white : Colors.grey.shade200),
         borderRadius: BorderRadius.circular(4),
         border: Border.all(
-          color: data != null
-              ? SkyBlueColors.primary.withValues(alpha: 0.5)
-              : Colors.grey.shade400,
+          color: isCurrentlyReading
+              ? Colors.orange.shade400
+              : (data != null
+                  ? SkyBlueColors.primary.withValues(alpha: 0.5)
+                  : Colors.grey.shade400),
+          width: isCurrentlyReading ? 2 : 1,
         ),
       ),
       child: Row(
@@ -883,12 +1038,25 @@ class _DataStoragePageState extends State<DataStoragePage> {
           // ID 和名稱
           SizedBox(
             width: 70,
-            child: Text(
-              name,
-              style: TextStyle(
-                fontWeight: FontWeight.bold,
-                fontSize: 10,
-                color: data != null ? Colors.black : Colors.grey,
+            child: Container(
+              padding: isCurrentlyReading
+                  ? const EdgeInsets.symmetric(horizontal: 4, vertical: 1)
+                  : EdgeInsets.zero,
+              decoration: isCurrentlyReading
+                  ? BoxDecoration(
+                      color: Colors.orange.shade300,
+                      borderRadius: BorderRadius.circular(3),
+                    )
+                  : null,
+              child: Text(
+                name,
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 10,
+                  color: isCurrentlyReading
+                      ? Colors.white
+                      : (data != null ? Colors.black : Colors.grey),
+                ),
               ),
             ),
           ),
@@ -935,16 +1103,24 @@ class _DataStoragePageState extends State<DataStoragePage> {
     final idleData = widget.dataStorage.getStm32LatestIdleData(id);
     final data = runningData ?? idleData;
 
+    // 判斷當前項目是否正在被讀取（用於高亮顯示）
+    final isCurrentlyReading = _stm32SensorReadingId == id;
+
     return Container(
       margin: const EdgeInsets.only(bottom: 4),
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
       decoration: BoxDecoration(
-        color: data != null ? Colors.white : Colors.grey.shade200,
+        color: isCurrentlyReading
+            ? Colors.yellow.shade200
+            : (data != null ? Colors.white : Colors.grey.shade200),
         borderRadius: BorderRadius.circular(4),
         border: Border.all(
-          color: data != null
-              ? SkyBlueColors.primary.withValues(alpha: 0.5)
-              : Colors.grey.shade400,
+          color: isCurrentlyReading
+              ? Colors.orange.shade400
+              : (data != null
+                  ? SkyBlueColors.primary.withValues(alpha: 0.5)
+                  : Colors.grey.shade400),
+          width: isCurrentlyReading ? 2 : 1,
         ),
       ),
       child: Row(
@@ -952,12 +1128,25 @@ class _DataStoragePageState extends State<DataStoragePage> {
           // ID 和名稱
           SizedBox(
             width: 100,
-            child: Text(
-              name,
-              style: TextStyle(
-                fontWeight: FontWeight.bold,
-                fontSize: 12,
-                color: data != null ? Colors.black : Colors.grey,
+            child: Container(
+              padding: isCurrentlyReading
+                  ? const EdgeInsets.symmetric(horizontal: 4, vertical: 2)
+                  : EdgeInsets.zero,
+              decoration: isCurrentlyReading
+                  ? BoxDecoration(
+                      color: Colors.orange.shade300,
+                      borderRadius: BorderRadius.circular(3),
+                    )
+                  : null,
+              child: Text(
+                name,
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 12,
+                  color: isCurrentlyReading
+                      ? Colors.white
+                      : (data != null ? Colors.black : Colors.grey),
+                ),
               ),
             ),
           ),

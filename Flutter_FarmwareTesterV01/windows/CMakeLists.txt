@@ -106,3 +106,8 @@ install(DIRECTORY "${PROJECT_BUILD_DIR}/${FLUTTER_ASSET_DIR_NAME}"
 install(FILES "${AOT_LIBRARY}" DESTINATION "${INSTALL_BUNDLE_DATA_DIR}"
   CONFIGURATIONS Profile;Release
   COMPONENT Runtime)
+
+# Create firmware folder in the output directory
+install(CODE "
+  file(MAKE_DIRECTORY \"${CMAKE_INSTALL_PREFIX}/firmware\")
+  " COMPONENT Runtime)
