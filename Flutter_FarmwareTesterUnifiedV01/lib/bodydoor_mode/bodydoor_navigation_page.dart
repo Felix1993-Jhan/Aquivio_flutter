@@ -107,6 +107,12 @@ class _BodyDoorNavigationPageState extends State<BodyDoorNavigationPage>
   /// Arduino 連接重試計數
   int _arduinoConnectRetryCount = 0;
 
+  /// 錯誤模式對話框是否正在顯示（防止重複彈出）
+  bool _isWrongModeDialogShowing = false;
+
+  /// 錯誤對話框是否正在顯示（防止重複彈出）
+  bool _isErrorDialogShowing = false;
+
   // ==================== AutoDetectionController Mixin 實作 ====================
 
   @override
@@ -255,6 +261,16 @@ class _BodyDoorNavigationPageState extends State<BodyDoorNavigationPage>
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _refreshPorts();
       _startPortMonitor();
+
+      // 監聽錯誤模式偵測
+      _arduinoManager.wrongModeDetectedNotifier.addListener(_onWrongModeDetected);
+
+      // 延遲執行自動連線，確保 _availablePorts 已更新完成
+      Future.delayed(const Duration(milliseconds: 200), () {
+        if (mounted) {
+          _autoConnectArduinoIfNeeded();
+        }
+      });
     });
   }
 
@@ -263,11 +279,44 @@ class _BodyDoorNavigationPageState extends State<BodyDoorNavigationPage>
     await ThresholdSettingsService().init();
   }
 
+  /// 如果從模式選擇頁帶入已偵測的 Arduino 埠，自動連線
+  void _autoConnectArduinoIfNeeded() {
+    final port = widget.initialArduinoPort;
+    if (port != null && port.isNotEmpty && _availablePorts.contains(port)) {
+      // 設定選中的埠並自動連線
+      setState(() => _selectedArduinoPort = port);
+      // 延遲一小段時間讓 UI 更新後再連線
+      Future.delayed(const Duration(milliseconds: 100), () {
+        if (mounted && !_arduinoManager.isConnected) {
+          connectArduino();
+        }
+      });
+    }
+  }
+
+  /// 監聽錯誤模式偵測（在 BodyDoor 模式下偵測到 Main 裝置）
+  void _onWrongModeDetected() {
+    if (_arduinoManager.wrongModeDetectedNotifier.value) {
+      // 重置 notifier
+      _arduinoManager.wrongModeDetectedNotifier.value = false;
+
+      // 如果對話框已經在顯示，不重複彈出
+      if (_isWrongModeDialogShowing) return;
+
+      // 取得當前連線的埠名稱
+      final detectedPort = _arduinoManager.currentPortName;
+      if (detectedPort != null) {
+        _showWrongModeDialog(detectedPort);
+      }
+    }
+  }
+
   @override
   void dispose() {
     _portMonitorTimer?.cancel();
     _messageTimer?.cancel();
     _statusMessage.dispose();
+    _arduinoManager.wrongModeDetectedNotifier.removeListener(_onWrongModeDetected);
     _arduinoManager.dispose();
     _dataStorage.dispose();
     super.dispose();
@@ -373,6 +422,7 @@ class _BodyDoorNavigationPageState extends State<BodyDoorNavigationPage>
   }
 
   void _showSnackBar(String message) {
+    if (!mounted) return;  // 防止在 dispose 後使用
     _messageTimer?.cancel();
     _statusMessage.value = message;
     _messageTimer = Timer(const Duration(seconds: 2), () {
@@ -384,6 +434,10 @@ class _BodyDoorNavigationPageState extends State<BodyDoorNavigationPage>
 
   /// 顯示錯誤提示對話框
   void _showErrorDialog(String message) {
+    // 防止重複彈出錯誤對話框
+    if (_isErrorDialogShowing) return;
+    _isErrorDialogShowing = true;
+
     showGeneralDialog(
       context: context,
       barrierDismissible: true,
@@ -397,8 +451,14 @@ class _BodyDoorNavigationPageState extends State<BodyDoorNavigationPage>
         // 2 秒後自動關閉
         if (animation.status == AnimationStatus.completed) {
           Future.delayed(const Duration(seconds: 2), () {
-            if (mounted && Navigator.of(dialogContext).canPop()) {
-              Navigator.of(dialogContext).pop();
+            if (!mounted) return;
+            try {
+              final navigator = Navigator.of(dialogContext);
+              if (navigator.canPop()) {
+                navigator.pop();
+              }
+            } catch (e) {
+              // dialogContext 已失效，忽略錯誤
             }
           });
         }
@@ -446,14 +506,19 @@ class _BodyDoorNavigationPageState extends State<BodyDoorNavigationPage>
           ),
         );
       },
-    );
+    ).then((_) {
+      // 對話框關閉時重置標記
+      _isErrorDialogShowing = false;
+    });
   }
 
   /// 顯示偵測到錯誤模式裝置的對話框
   void _showWrongModeDialog(String detectedPort) {
+    _isWrongModeDialogShowing = true;
+
     showDialog(
       context: context,
-      barrierDismissible: false,
+      barrierDismissible: true,  // 允許點擊外部關閉（視為取消）
       builder: (dialogContext) => AlertDialog(
         title: Row(
           children: [
@@ -469,11 +534,13 @@ class _BodyDoorNavigationPageState extends State<BodyDoorNavigationPage>
           TextButton(
             onPressed: () {
               Navigator.of(dialogContext).pop();
+              // _isWrongModeDialogShowing 保持 true，讓 .then() 執行斷開連線
             },
             child: Text(tr('cancel')),
           ),
           ElevatedButton.icon(
             onPressed: () {
+              _isWrongModeDialogShowing = false;  // 先設為 false，避免 .then() 執行斷開連線
               Navigator.of(dialogContext).pop();
               // 直接切換到 Main 模式，並傳入偵測到的串口
               Navigator.of(context).pushReplacement(
@@ -491,7 +558,13 @@ class _BodyDoorNavigationPageState extends State<BodyDoorNavigationPage>
           ),
         ],
       ),
-    );
+    ).then((_) {
+      // 點擊外部或取消按鈕關閉時執行斷開連線
+      if (_isWrongModeDialogShowing) {
+        _isWrongModeDialogShowing = false;
+        disconnectArduino();
+      }
+    });
   }
 
   // ==================== UI 建構 ====================
@@ -681,10 +754,16 @@ class _BodyDoorNavigationPageState extends State<BodyDoorNavigationPage>
                   ),
                 ),
                 const SizedBox(height: 8),
-                _buildConnectionStatus(
-                  'Arduino',
-                  _arduinoManager.isConnected,
-                  EmeraldColors.primary,
+                // 使用 ValueListenableBuilder 局部更新，避免整個抽屜重建
+                ValueListenableBuilder<bool>(
+                  valueListenable: _arduinoManager.isConnectedNotifier,
+                  builder: (context, isConnected, _) {
+                    return _buildConnectionStatus(
+                      'Arduino',
+                      isConnected,
+                      EmeraldColors.primary,
+                    );
+                  },
                 ),
               ],
             ),

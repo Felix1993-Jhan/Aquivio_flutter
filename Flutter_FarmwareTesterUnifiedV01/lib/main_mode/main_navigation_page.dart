@@ -168,6 +168,12 @@ class _MainNavigationPageState extends State<MainNavigationPage>
   /// STM32 連接重試計數
   int _urConnectRetryCount = 0;
 
+  /// 錯誤模式對話框是否正在顯示（防止重複彈出）
+  bool _isWrongModeDialogShowing = false;
+
+  /// 錯誤對話框是否正在顯示（防止重複彈出）
+  bool _isErrorDialogShowing = false;
+
   // ==================== UI 控制器 ====================
 
   final TextEditingController _urHexController = TextEditingController();
@@ -502,6 +508,16 @@ class _MainNavigationPageState extends State<MainNavigationPage>
       _startPortMonitor();  // 啟動 COM 埠監控
       _initStLinkService(); // 初始化 ST-Link 服務
       _checkRequiredCli();  // 檢查必要的 CLI 工具
+
+      // 監聽錯誤模式偵測
+      _arduinoManager.wrongModeDetectedNotifier.addListener(_onWrongModeDetected);
+
+      // 延遲執行自動連線，確保 _availablePorts 已更新完成
+      Future.delayed(const Duration(milliseconds: 200), () {
+        if (mounted) {
+          _autoConnectArduinoIfNeeded();
+        }
+      });
     });
   }
 
@@ -618,12 +634,45 @@ class _MainNavigationPageState extends State<MainNavigationPage>
     await ThresholdSettingsService().init();
   }
 
+  /// 如果從模式選擇頁帶入已偵測的 Arduino 埠，自動連線
+  void _autoConnectArduinoIfNeeded() {
+    final port = widget.initialArduinoPort;
+    if (port != null && port.isNotEmpty && _availablePorts.contains(port)) {
+      // 設定選中的埠並自動連線
+      setState(() => _selectedArduinoPort = port);
+      // 延遲一小段時間讓 UI 更新後再連線
+      Future.delayed(const Duration(milliseconds: 100), () {
+        if (mounted && !_arduinoManager.isConnected) {
+          connectArduino();
+        }
+      });
+    }
+  }
+
+  /// 監聽錯誤模式偵測（在 Main 模式下偵測到 BodyDoor 裝置）
+  void _onWrongModeDetected() {
+    if (_arduinoManager.wrongModeDetectedNotifier.value) {
+      // 重置 notifier
+      _arduinoManager.wrongModeDetectedNotifier.value = false;
+
+      // 如果對話框已經在顯示，不重複彈出
+      if (_isWrongModeDialogShowing) return;
+
+      // 取得當前連線的埠名稱
+      final detectedPort = _arduinoManager.currentPortName;
+      if (detectedPort != null) {
+        _showWrongModeDialog(detectedPort);
+      }
+    }
+  }
+
   @override
   void dispose() {
     _portMonitorTimer?.cancel();
     _flowReadTimer?.cancel();
     _messageTimer?.cancel();
     _urVerificationTimer?.cancel();
+    _arduinoManager.wrongModeDetectedNotifier.removeListener(_onWrongModeDetected);
     _arduinoManager.dispose();
     _urManager.dispose();
     _dataStorage.dispose();
@@ -764,6 +813,26 @@ class _MainNavigationPageState extends State<MainNavigationPage>
     }
   }
 
+  // ==================== 頁面切換 ====================
+
+  /// 抽屜頁面點擊處理（先關閉抽屜，延遲後切換頁面，讓動畫更流暢）
+  void _onDrawerPageTap(int index, {VoidCallback? onAfterSwitch}) {
+    Navigator.pop(context); // 先關閉抽屜
+
+    // 延遲切換頁面，讓抽屜關閉動畫完成
+    if (_selectedPageIndex != index) {
+      Future.delayed(const Duration(milliseconds: 150), () {
+        if (mounted) {
+          setState(() => _selectedPageIndex = index);
+          onAfterSwitch?.call();
+        }
+      });
+    } else {
+      // 如果是同一頁，直接執行回調
+      onAfterSwitch?.call();
+    }
+  }
+
   // ==================== 串口操作 ====================
 
   /// 刷新可用 COM 埠列表和韌體檔案
@@ -783,6 +852,7 @@ class _MainNavigationPageState extends State<MainNavigationPage>
   }
 
   void _showSnackBar(String message) {
+    if (!mounted) return;  // 防止在 dispose 後使用
     _messageTimer?.cancel();
     _statusMessage.value = message;
     _messageTimer = Timer(const Duration(seconds: 2), () {
@@ -794,6 +864,10 @@ class _MainNavigationPageState extends State<MainNavigationPage>
 
   /// 顯示錯誤提示對話框（畫面中央，2秒後自動關閉，或點擊關閉，帶淡入縮放動畫）
   void _showErrorDialog(String message) {
+    // 防止重複彈出錯誤對話框
+    if (_isErrorDialogShowing) return;
+    _isErrorDialogShowing = true;
+
     showGeneralDialog(
       context: context,
       barrierDismissible: true,
@@ -806,8 +880,14 @@ class _MainNavigationPageState extends State<MainNavigationPage>
       transitionBuilder: (dialogContext, animation, secondaryAnimation, child) {
         if (animation.status == AnimationStatus.completed) {
           Future.delayed(const Duration(seconds: 2), () {
-            if (mounted && Navigator.of(dialogContext).canPop()) {
-              Navigator.of(dialogContext).pop();
+            if (!mounted) return;
+            try {
+              final navigator = Navigator.of(dialogContext);
+              if (navigator.canPop()) {
+                navigator.pop();
+              }
+            } catch (e) {
+              // dialogContext 已失效，忽略錯誤
             }
           });
         }
@@ -854,14 +934,19 @@ class _MainNavigationPageState extends State<MainNavigationPage>
           ),
         );
       },
-    );
+    ).then((_) {
+      // 對話框關閉時重置標記
+      _isErrorDialogShowing = false;
+    });
   }
 
   /// 顯示偵測到錯誤模式裝置的對話框
   void _showWrongModeDialog(String detectedPort) {
+    _isWrongModeDialogShowing = true;
+
     showDialog(
       context: context,
-      barrierDismissible: false,
+      barrierDismissible: true,  // 允許點擊外部關閉（視為取消）
       builder: (dialogContext) => AlertDialog(
         title: Row(
           children: [
@@ -877,11 +962,13 @@ class _MainNavigationPageState extends State<MainNavigationPage>
           TextButton(
             onPressed: () {
               Navigator.of(dialogContext).pop();
+              // _isWrongModeDialogShowing 保持 true，讓 .then() 執行斷開連線
             },
             child: Text(tr('cancel')),
           ),
           ElevatedButton.icon(
             onPressed: () {
+              _isWrongModeDialogShowing = false;  // 先設為 false，避免 .then() 執行斷開連線
               Navigator.of(dialogContext).pop();
               // 直接切換到 BodyDoor 模式，並傳入偵測到的串口
               Navigator.of(context).pushReplacement(
@@ -899,7 +986,13 @@ class _MainNavigationPageState extends State<MainNavigationPage>
           ),
         ],
       ),
-    );
+    ).then((_) {
+      // 點擊外部或取消按鈕關閉時執行斷開連線
+      if (_isWrongModeDialogShowing) {
+        _isWrongModeDialogShowing = false;
+        disconnectArduino();
+      }
+    });
   }
 
   // ==================== 串口輸入處理 ====================
@@ -1060,13 +1153,7 @@ class _MainNavigationPageState extends State<MainNavigationPage>
             title: Text(tr('main_page_auto_detection')),
             selected: _selectedPageIndex == 0,
             selectedTileColor: Colors.blue.shade50,
-            onTap: () {
-              if (_selectedPageIndex != 0) {
-                setState(() => _selectedPageIndex = 0);
-              }
-              Navigator.pop(context);
-              _scanFirmwareFiles();
-            },
+            onTap: () => _onDrawerPageTap(0, onAfterSwitch: _scanFirmwareFiles),
           ),
           // 頁面選項 2: 命令控制
           ListTile(
@@ -1074,12 +1161,7 @@ class _MainNavigationPageState extends State<MainNavigationPage>
             title: Text(tr('page_command_control')),
             selected: _selectedPageIndex == 1,
             selectedTileColor: Colors.blue.shade50,
-            onTap: () {
-              if (_selectedPageIndex != 1) {
-                setState(() => _selectedPageIndex = 1);
-              }
-              Navigator.pop(context);
-            },
+            onTap: () => _onDrawerPageTap(1),
           ),
           // 頁面選項 3: 資料儲存
           ListTile(
@@ -1087,12 +1169,7 @@ class _MainNavigationPageState extends State<MainNavigationPage>
             title: Text(tr('page_data_storage')),
             selected: _selectedPageIndex == 2,
             selectedTileColor: Colors.blue.shade50,
-            onTap: () {
-              if (_selectedPageIndex != 2) {
-                setState(() => _selectedPageIndex = 2);
-              }
-              Navigator.pop(context);
-            },
+            onTap: () => _onDrawerPageTap(2),
           ),
           // 頁面選項 4: 韌體燒錄
           ListTile(
@@ -1100,12 +1177,7 @@ class _MainNavigationPageState extends State<MainNavigationPage>
             title: Text(tr('page_firmware_upload')),
             selected: _selectedPageIndex == 3,
             selectedTileColor: Colors.blue.shade50,
-            onTap: () {
-              if (_selectedPageIndex != 3) {
-                setState(() => _selectedPageIndex = 3);
-              }
-              Navigator.pop(context);
-            },
+            onTap: () => _onDrawerPageTap(3),
           ),
           // 頁面選項 5: 設定
           ListTile(
@@ -1113,12 +1185,7 @@ class _MainNavigationPageState extends State<MainNavigationPage>
             title: Text(tr('page_settings')),
             selected: _selectedPageIndex == 4,
             selectedTileColor: Colors.blue.shade50,
-            onTap: () {
-              if (_selectedPageIndex != 4) {
-                setState(() => _selectedPageIndex = 4);
-              }
-              Navigator.pop(context);
-            },
+            onTap: () => _onDrawerPageTap(4),
           ),
           // 頁面選項 6: 操作畫面
           ListTile(
@@ -1126,12 +1193,7 @@ class _MainNavigationPageState extends State<MainNavigationPage>
             title: Text(tr('page_operation')),
             selected: _selectedPageIndex == 5,
             selectedTileColor: Colors.blue.shade50,
-            onTap: () {
-              if (_selectedPageIndex != 5) {
-                setState(() => _selectedPageIndex = 5);
-              }
-              Navigator.pop(context);
-            },
+            onTap: () => _onDrawerPageTap(5),
           ),
           const Divider(),
           // 連接狀態顯示
@@ -1148,16 +1210,27 @@ class _MainNavigationPageState extends State<MainNavigationPage>
                   ),
                 ),
                 const SizedBox(height: 8),
-                _buildConnectionStatus(
-                  'Arduino',
-                  _arduinoManager.isConnected,
-                  EmeraldColors.primary,
+                // 使用 ValueListenableBuilder 局部更新，避免整個抽屜重建
+                ValueListenableBuilder<bool>(
+                  valueListenable: _arduinoManager.isConnectedNotifier,
+                  builder: (context, isConnected, _) {
+                    return _buildConnectionStatus(
+                      'Arduino',
+                      isConnected,
+                      EmeraldColors.primary,
+                    );
+                  },
                 ),
                 const SizedBox(height: 4),
-                _buildConnectionStatus(
-                  'STM32',
-                  _urManager.isConnected,
-                  SkyBlueColors.primary,
+                ValueListenableBuilder<bool>(
+                  valueListenable: _urManager.isConnectedNotifier,
+                  builder: (context, isConnected, _) {
+                    return _buildConnectionStatus(
+                      'STM32',
+                      isConnected,
+                      SkyBlueColors.primary,
+                    );
+                  },
                 ),
               ],
             ),

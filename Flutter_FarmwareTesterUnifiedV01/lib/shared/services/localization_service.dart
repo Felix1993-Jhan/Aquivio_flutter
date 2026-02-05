@@ -274,9 +274,9 @@ class LocalizationService {
 
       // 短路測試設定（僅 Main 使用）
       'short_circuit_test_settings': '短路測試設定',
-      'short_circuit_test_desc': '設定是否顯示 VDD/VSS 短路測試結果',
+      'short_circuit_test_desc': '設定���否顯示 VDD/VSS 短路測試結果',
       'show_vdd_short_test': '顯示 VDD 短路測試',
-      'show_vdd_short_test_desc': '電源短路測試（Idle 數值落入 Running 範圍）',
+      'show_vdd_short_test_desc': '電源短路測試（Idle 數值落入 Running 範��）',
       'show_vss_short_test': '顯示 VSS 短路測試',
       'show_vss_short_test_desc': '接地短路測試（Running 數值落入 Idle 範圍）',
       'adjacent_short_test_optimization': '相鄰短路測試優化',
@@ -593,9 +593,12 @@ class LocalizationService {
       'cli_recheck': '重新檢查',
 
       // 跨模式偵測（衝突 — 以前綴區分）
+      'wrong_mode_detected': '偵測到不同模式的裝置',
       'wrong_mode_detected_title': '偵測到不同模式的裝置',
       'main_wrong_mode_detected_message': '偵測到 Body&Door Board 的 Arduino，是否切換到正確模式？',
       'bodydoor_wrong_mode_detected_message': '偵測到 Main Board 的 Arduino，是否切換到正確模式？',
+      'switch_to_bodydoor_mode': '切換到 Body&Door 模式',
+      'switch_to_main_mode': '切換到 Main 模式',
       'switch_mode': '切換模式',
     },
 
@@ -1143,9 +1146,12 @@ class LocalizationService {
       'cli_recheck': 'Recheck',
 
       // Cross-mode detection（衝突 — 以前綴區分）
+      'wrong_mode_detected': 'Different Device Detected',
       'wrong_mode_detected_title': 'Different Device Detected',
       'main_wrong_mode_detected_message': 'Detected Body&Door Board Arduino. Switch to the correct mode?',
       'bodydoor_wrong_mode_detected_message': 'Detected Main Board Arduino. Switch to the correct mode?',
+      'switch_to_bodydoor_mode': 'Switch to Body&Door Mode',
+      'switch_to_main_mode': 'Switch to Main Mode',
       'switch_mode': 'Switch Mode',
     },
   };

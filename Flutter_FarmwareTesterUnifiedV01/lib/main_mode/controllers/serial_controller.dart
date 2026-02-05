@@ -76,15 +76,18 @@ mixin SerialController<T extends StatefulWidget> on State<T> {
   /// 嘗試連接 Arduino（支援自動重試）
   void _tryConnectArduino() {
     if (selectedArduinoPort == null) return;
+    if (!mounted) return;  // 防止在 dispose 後執行
 
     if (arduinoManager.open(selectedArduinoPort!)) {
       arduinoManager.startHeartbeat();
-      setState(() {});
+      if (mounted) setState(() {});
       showSnackBarMessage(tr('arduino_connected'));
       arduinoConnectRetryCount = 0;
       // 連接成功後發送 flowoff
       Future.delayed(const Duration(milliseconds: 500), () {
-        sendArduinoFlowoff();
+        if (mounted && arduinoManager.isConnected) {
+          sendArduinoFlowoff();
+        }
       });
     } else {
       arduinoConnectRetryCount++;
@@ -93,7 +96,7 @@ mixin SerialController<T extends StatefulWidget> on State<T> {
             .replaceAll('{current}', '$arduinoConnectRetryCount')
             .replaceAll('{max}', '$maxConnectRetry'));
         Future.delayed(const Duration(milliseconds: 500), () {
-          if (mounted && !arduinoManager.isConnected) {
+          if (mounted && !arduinoManager.isConnected && arduinoConnectRetryCount > 0) {
             _tryConnectArduino();
           }
         });
@@ -106,10 +109,12 @@ mixin SerialController<T extends StatefulWidget> on State<T> {
 
   /// 斷開 Arduino 連接
   void disconnectArduino() {
+    // 停止重試機制
+    arduinoConnectRetryCount = 0;
     sendArduinoFlowoff();
     stopAutoFlowRead();
     arduinoManager.close();
-    setState(() {});
+    if (mounted) setState(() {});
     showSnackBarMessage(tr('arduino_disconnected'));
   }
 
@@ -220,9 +225,10 @@ mixin SerialController<T extends StatefulWidget> on State<T> {
   /// 嘗試連接 STM32（支援自動重試）
   void _tryConnectUr() {
     if (selectedUrPort == null) return;
+    if (!mounted) return;  // 防止在 dispose 後執行
 
     if (urManager.open(selectedUrPort!)) {
-      setState(() {});
+      if (mounted) setState(() {});
       showSnackBarMessage(tr('stm32_verifying'));
       urConnectRetryCount = 0;
 
@@ -231,7 +237,7 @@ mixin SerialController<T extends StatefulWidget> on State<T> {
 
       // 連接成功後自動查詢韌體版本（作為 PING）
       Future.delayed(const Duration(milliseconds: 300), () {
-        if (urManager.isConnected) {
+        if (mounted && urManager.isConnected) {
           final payload = [0x05, 0x00, 0x00, 0x00, 0x00];
           final cmd = URCommandBuilder.buildCommand(payload);
           urManager.sendHex(cmd);
@@ -244,7 +250,7 @@ mixin SerialController<T extends StatefulWidget> on State<T> {
             .replaceAll('{current}', '$urConnectRetryCount')
             .replaceAll('{max}', '$maxConnectRetry'));
         Future.delayed(const Duration(milliseconds: 500), () {
-          if (mounted && !urManager.isConnected) {
+          if (mounted && !urManager.isConnected && urConnectRetryCount > 0) {
             _tryConnectUr();
           }
         });
@@ -257,10 +263,12 @@ mixin SerialController<T extends StatefulWidget> on State<T> {
 
   /// 斷開 STM32 連接
   void disconnectUr() {
+    // 停止重試機制
+    urConnectRetryCount = 0;
     cancelUrVerificationTimeout();
     sendArduinoFlowoff();
     urManager.close();
-    setState(() {});
+    if (mounted) setState(() {});
     showSnackBarMessage(tr('stm32_disconnected'));
   }
 

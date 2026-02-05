@@ -47,10 +47,11 @@ mixin SerialController<T extends StatefulWidget> on State<T> {
   /// 嘗試連接 Arduino（支援自動重試）
   void _tryConnectArduino() {
     if (selectedArduinoPort == null) return;
+    if (!mounted) return;  // 防止在 dispose 後執行
 
     if (arduinoManager.open(selectedArduinoPort!)) {
       arduinoManager.startHeartbeat();
-      setState(() {});
+      if (mounted) setState(() {});
       showSnackBarMessage(tr('arduino_connected'));
       arduinoConnectRetryCount = 0;
     } else {
@@ -60,7 +61,7 @@ mixin SerialController<T extends StatefulWidget> on State<T> {
             .replaceAll('{current}', '$arduinoConnectRetryCount')
             .replaceAll('{max}', '$maxConnectRetry'));
         Future.delayed(const Duration(milliseconds: 500), () {
-          if (mounted && !arduinoManager.isConnected) {
+          if (mounted && !arduinoManager.isConnected && arduinoConnectRetryCount > 0) {
             _tryConnectArduino();
           }
         });
@@ -73,8 +74,10 @@ mixin SerialController<T extends StatefulWidget> on State<T> {
 
   /// 斷開 Arduino 連接
   void disconnectArduino() {
+    // 停止重試機制
+    arduinoConnectRetryCount = 0;
     arduinoManager.close();
-    setState(() {});
+    if (mounted) setState(() {});
     showSnackBarMessage(tr('arduino_disconnected'));
   }
 

@@ -123,7 +123,9 @@ class ArduinoPanel extends StatelessWidget {
                 builder: (context, isConnected, _) {
                   if (!isConnected) return const SizedBox.shrink();
                   return Tooltip(
-                    message: heartbeatOk ? tr('continuous_connection') : tr('connection_lost'),
+                    message: heartbeatOk
+                        ? tr('continuous_connection')
+                        : tr('connection_lost'),
                     child: Icon(
                       heartbeatOk ? Icons.link : Icons.link_off,
                       color: heartbeatOk ? Colors.green.shade700 : Colors.red,
@@ -140,8 +142,7 @@ class ArduinoPanel extends StatelessWidget {
             valueListenable: isConnectedNotifier,
             builder: (context, isConnected, _) {
               return Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 decoration: BoxDecoration(
                   color: isConnected ? Colors.green : Colors.red,
                   borderRadius: BorderRadius.circular(12),
@@ -170,11 +171,16 @@ class ArduinoPanel extends StatelessWidget {
                 labelText: tr('select_com_port'),
                 border: const OutlineInputBorder(),
                 isDense: true,
-                contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 8,
+                ),
               ),
               child: DropdownButtonHideUnderline(
                 child: DropdownButton<String>(
-                  value: availablePorts.contains(selectedPort) ? selectedPort : null,
+                  value: availablePorts.contains(selectedPort)
+                      ? selectedPort
+                      : null,
                   hint: Text(tr('select_com_port')),
                   isExpanded: true,
                   isDense: true,
@@ -215,7 +221,10 @@ class ArduinoPanel extends StatelessWidget {
           children: [
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 12),
-              child: Text(tr('command_buttons'), style: const TextStyle(fontWeight: FontWeight.bold)),
+              child: Text(
+                tr('command_buttons'),
+                style: const TextStyle(fontWeight: FontWeight.bold),
+              ),
             ),
             const SizedBox(height: 4),
             // 分組顯示指令按鈕
@@ -223,7 +232,10 @@ class ArduinoPanel extends StatelessWidget {
               final label = group['label'] as String;
               final commands = group['commands'] as List<String>;
               return Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 2,
+                ),
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.center,
                   children: [
@@ -231,7 +243,10 @@ class ArduinoPanel extends StatelessWidget {
                       width: 100,
                       child: Text(
                         label,
-                        style: const TextStyle(fontSize: 10, color: Colors.grey),
+                        style: const TextStyle(
+                          fontSize: 10,
+                          color: Colors.grey,
+                        ),
                       ),
                     ),
                     Expanded(
@@ -243,11 +258,16 @@ class ArduinoPanel extends StatelessWidget {
                             onPressed: () => onSendCommand(cmd),
                             style: ElevatedButton.styleFrom(
                               minimumSize: const Size(50, 28),
-                              padding: const EdgeInsets.symmetric(horizontal: 8),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                              ),
                               backgroundColor: EmeraldColors.primary,
                               foregroundColor: Colors.white,
                             ),
-                            child: Text(cmd, style: const TextStyle(fontSize: 10)),
+                            child: Text(
+                              cmd,
+                              style: const TextStyle(fontSize: 10),
+                            ),
                           );
                         }).toList(),
                       ),
@@ -276,8 +296,10 @@ class ArduinoPanel extends StatelessWidget {
             padding: const EdgeInsets.symmetric(horizontal: 12),
             child: Row(
               children: [
-                Text(tr('receive_log'),
-                    style: const TextStyle(fontWeight: FontWeight.bold)),
+                Text(
+                  tr('receive_log'),
+                  style: const TextStyle(fontWeight: FontWeight.bold),
+                ),
                 const Spacer(),
                 TextButton(
                   onPressed: onClearLog,
