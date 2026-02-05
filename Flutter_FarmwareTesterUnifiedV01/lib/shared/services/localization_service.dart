@@ -117,6 +117,7 @@ class LocalizationService {
       'hardware_idle': '硬體無動作 (Idle)',
       'hardware_running': '硬體動作中 (Running)',
       'sensor_detection': '感應偵測',
+      'show_adjacent_details': '顯示相鄰短路詳情',
 
       // 資料儲存頁面
       'arduino_data': 'Arduino 數據',
@@ -666,6 +667,7 @@ class LocalizationService {
       'hardware_idle': 'Hardware Idle',
       'hardware_running': 'Hardware Running',
       'sensor_detection': 'Sensor Detection',
+      'show_adjacent_details': 'Show Adjacent Short Details',
 
       // Data storage page
       'arduino_data': 'Arduino Data',

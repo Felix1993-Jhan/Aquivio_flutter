@@ -11,6 +11,7 @@ import 'package:flutter_libserialport/flutter_libserialport.dart';
 
 import 'package:flutter_firmware_tester_unified/shared/services/data_storage_service.dart';
 import 'package:flutter_firmware_tester_unified/main_mode/main_navigation_page.dart' show MainNavigationPage;
+import 'package:flutter_firmware_tester_unified/mode_selection_page.dart';
 import 'services/serial_port_manager.dart';
 import 'package:flutter_firmware_tester_unified/shared/services/localization_service.dart';
 import 'services/threshold_settings_service.dart';
@@ -687,6 +688,24 @@ class _BodyDoorNavigationPageState extends State<BodyDoorNavigationPage>
                 ),
               ],
             ),
+          ),
+          const Divider(),
+          // 切換模式選項
+          ListTile(
+            leading: const Icon(Icons.swap_horiz),
+            title: Text(tr('switch_mode')),
+            onTap: () {
+              Navigator.pop(context); // 關閉抽屜
+              // 斷開所有連接
+              disconnectArduino();
+              // 返回模式選擇頁面
+              Navigator.pushReplacement(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => const ModeSelectionPage(),
+                ),
+              );
+            },
           ),
         ],
       ),

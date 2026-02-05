@@ -369,6 +369,9 @@ class _AutoDetectionPageState extends State<AutoDetectionPage> {
   // 感測器區域的項目高度（用於計算滾動位置）
   static const double _sensorRowHeight = 32.0;
 
+  // 是否顯示相鄰腳位短路詳細資料
+  bool _showAdjacentDetails = false;
+
   @override
   void dispose() {
     _idleScrollController.dispose();
@@ -581,12 +584,12 @@ class _AutoDetectionPageState extends State<AutoDetectionPage> {
                         bottom: 76,
                         child: _buildSlowDebugButton(),
                       ),
-                    // 相鄰短路顯示模式切換按鈕（在調試按鈕上方）
-                    if (widget.onToggleAdjacentDisplayMode != null)
+                    // 自動檢測開始按鈕（在調試按鈕上方）
+                    if (widget.onStartAutoDetection != null)
                       Positioned(
                         right: 16,
                         bottom: 136,
-                        child: _buildAdjacentDisplayModeButton(),
+                        child: _buildAutoStartButton(),
                       ),
                     // 調試訊息顯示區（慢速模式下顯示）
                     if (widget.isSlowDebugMode && widget.debugMessage != null && widget.debugMessage!.isNotEmpty)
@@ -681,15 +684,15 @@ class _AutoDetectionPageState extends State<AutoDetectionPage> {
     );
   }
 
-  /// 建構相鄰短路顯示模式切換按鈕
-  Widget _buildAdjacentDisplayModeButton() {
-    final isNewMode = widget.adjacentDisplayInRunning;
+  /// 建構自動檢測開始浮動按鈕
+  Widget _buildAutoStartButton() {
+    final isDetecting = widget.isAutoDetecting;
     return Material(
       elevation: 6,
       shadowColor: Colors.black45,
       shape: const CircleBorder(),
       child: InkWell(
-        onTap: widget.onToggleAdjacentDisplayMode,
+        onTap: isDetecting ? null : () => widget.onStartAutoDetection?.call(),
         customBorder: const CircleBorder(),
         child: Container(
           width: 50,
@@ -699,21 +702,21 @@ class _AutoDetectionPageState extends State<AutoDetectionPage> {
             gradient: LinearGradient(
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
-              colors: isNewMode
-                  ? [Colors.teal.shade400, Colors.teal.shade700]
-                  : [Colors.blueGrey.shade400, Colors.blueGrey.shade600],
+              colors: isDetecting
+                  ? [Colors.grey.shade400, Colors.grey.shade600]
+                  : [Colors.green.shade400, Colors.green.shade700],
             ),
             border: Border.all(
-              color: isNewMode
-                  ? Colors.cyan.withValues(alpha: 0.5)
-                  : Colors.white.withValues(alpha: 0.3),
+              color: isDetecting
+                  ? Colors.white.withValues(alpha: 0.3)
+                  : Colors.lightGreen.withValues(alpha: 0.5),
               width: 2,
             ),
           ),
           child: Icon(
-            isNewMode ? Icons.view_column : Icons.view_agenda,
+            isDetecting ? Icons.hourglass_empty : Icons.play_arrow,
             color: Colors.white,
-            size: 24,
+            size: 28,
           ),
         ),
       ),
@@ -1227,12 +1230,8 @@ class _AutoDetectionPageState extends State<AutoDetectionPage> {
                 onConnect: widget.onArduinoConnect,
                 onDisconnect: widget.onArduinoDisconnect,
               ),
-              // 自動檢測按鈕（金屬機械風格）
-              _buildMetallicButton(
-                isCompact: false,
-                isAutoDetecting: widget.isAutoDetecting,
-                onPressed: () => widget.onStartAutoDetection?.call(),
-              ),
+              // 燒入並檢測按鈕
+              _buildProgramAndDetectButton(isCompact: false),
               // STM32 控制區
               _buildDeviceConnectionPanelMinimal(
                 deviceName: 'STM32',
@@ -1281,12 +1280,8 @@ class _AutoDetectionPageState extends State<AutoDetectionPage> {
                     ),
                   ),
                 ),
-                // 中間：自動檢測開始按鈕
-                _buildMetallicButton(
-                  isCompact: isCompact,
-                  isAutoDetecting: widget.isAutoDetecting,
-                  onPressed: () => widget.onStartAutoDetection?.call(),
-                ),
+                // 中間：燒入並檢測按鈕
+                _buildProgramAndDetectButton(isCompact: isCompact),
                 // 右側：STM32 控制區（Card）
                 Expanded(
                   child: Card(
@@ -1418,6 +1413,130 @@ class _AutoDetectionPageState extends State<AutoDetectionPage> {
                         : tr('auto_detection_start'),
                     style: TextStyle(
                       color: isAutoDetecting ? disabledText : textColor,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// 建構燒入並檢測按鈕（玻璃質感，琥珀色調）
+  Widget _buildProgramAndDetectButton({required bool isCompact}) {
+    final canStart = widget.isStLinkConnected &&
+                     !widget.isProgramming &&
+                     !widget.isAutoDetecting;
+    final isProcessing = widget.isProgramming || widget.isAutoDetecting;
+
+    // 琥珀色玻璃質感配色
+    final amberLight = Colors.amber.shade200;
+    final amberMid = Colors.amber.shade400;
+    final amberDark = Colors.amber.shade600;
+    const borderColor = Color(0xFFFFB300); // 深琥珀色邊框
+    const textColor = Color(0xFF424242);
+    const disabledText = Color(0xFF9E9E9E);
+    final disabledLight = Colors.grey.shade300;
+    final disabledMid = Colors.grey.shade400;
+    final disabledDark = Colors.grey.shade500;
+
+    if (isCompact) {
+      // 緊湊模式：圓形按鈕
+      return Center(
+        child: Container(
+          width: 40,
+          height: 40,
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: canStart
+                  ? [amberLight, amberMid, amberDark]
+                  : [disabledLight, disabledMid, disabledDark],
+              stops: const [0.0, 0.5, 1.0],
+            ),
+            shape: BoxShape.circle,
+            border: Border.all(
+              color: canStart ? borderColor : Colors.grey.shade400,
+              width: 1,
+            ),
+            boxShadow: const [
+              BoxShadow(
+                color: Colors.black26,
+                blurRadius: 4,
+                offset: Offset(0, 2),
+              ),
+            ],
+          ),
+          child: Material(
+            color: Colors.transparent,
+            child: InkWell(
+              onTap: canStart ? widget.onStartProgramAndDetect : null,
+              borderRadius: BorderRadius.circular(20),
+              child: Center(
+                child: Icon(
+                  isProcessing ? Icons.hourglass_empty : Icons.bolt,
+                  color: canStart ? textColor : disabledText,
+                  size: 22,
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    // 完整模式：橢圓形按鈕
+    return Center(
+      child: Container(
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(30),
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: canStart
+                ? [amberLight, amberMid, amberDark]
+                : [disabledLight, disabledMid, disabledDark],
+            stops: const [0.0, 0.6, 1.0],
+          ),
+          border: Border.all(
+            color: canStart ? borderColor : Colors.grey.shade400,
+            width: 1,
+          ),
+          boxShadow: const [
+            BoxShadow(
+              color: Colors.black26,
+              blurRadius: 6,
+              offset: Offset(0, 3),
+            ),
+          ],
+        ),
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: canStart ? widget.onStartProgramAndDetect : null,
+            borderRadius: BorderRadius.circular(30),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    isProcessing ? Icons.hourglass_empty : Icons.bolt,
+                    color: canStart ? textColor : disabledText,
+                    size: 20,
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    widget.isProgramming
+                        ? tr('programming')
+                        : tr('program_and_detect'),
+                    style: TextStyle(
+                      color: canStart ? textColor : disabledText,
                       fontSize: 14,
                       fontWeight: FontWeight.w500,
                     ),
@@ -1678,14 +1797,6 @@ class _AutoDetectionPageState extends State<AutoDetectionPage> {
     const primaryColor = Color(0xFF7B1FA2);  // 深紫色
     const lightColor = Color(0xFFCE93D8);    // 淺紫色
 
-    // 判斷是否可以開始燒入
-    // 需要：ST-Link 已連接、有選擇韌體、韌體檔案存在、非燒入中、非自動檢測中
-    final canStartProgram = widget.isStLinkConnected &&
-        widget.selectedFirmwarePath != null &&
-        widget.firmwareFiles.isNotEmpty &&
-        !widget.isProgramming &&
-        !widget.isAutoDetecting;
-
     return Container(
       decoration: BoxDecoration(
         gradient: LinearGradient(
@@ -1799,28 +1910,6 @@ class _AutoDetectionPageState extends State<AutoDetectionPage> {
                         ),
             ),
           ),
-          const SizedBox(width: 12),
-
-          // 燒入並檢測按鈕
-          ElevatedButton.icon(
-            onPressed: canStartProgram ? widget.onStartProgramAndDetect : null,
-            icon: Icon(
-              widget.isProgramming ? Icons.hourglass_empty : Icons.bolt,
-              size: 18,
-            ),
-            label: Text(
-              widget.isProgramming
-                  ? tr('programming')
-                  : tr('program_and_detect'),
-              style: const TextStyle(fontSize: 12),
-            ),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.amber,
-              foregroundColor: Colors.black87,
-              disabledBackgroundColor: Colors.grey.shade400,
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            ),
-          ),
         ],
       ),
     );
@@ -1902,7 +1991,7 @@ class _AutoDetectionPageState extends State<AutoDetectionPage> {
         children: [
           // 標題列（使用圓角裝飾，配合 Card 的 clipBehavior）
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
             decoration: BoxDecoration(
               color: color,
               borderRadius: const BorderRadius.only(
@@ -1910,14 +1999,32 @@ class _AutoDetectionPageState extends State<AutoDetectionPage> {
                 topRight: Radius.circular(10),
               ),
             ),
-            child: Text(
-              title,
-              style: const TextStyle(
-                fontSize: 14,
-                fontWeight: FontWeight.bold,
-                color: Colors.white,
-              ),
-              overflow: TextOverflow.ellipsis,
+            child: Row(
+              children: [
+                Text(
+                  title,
+                  style: const TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.white,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                ),
+                const Spacer(),
+                // 詳細資料展開按鈕（僅 Running 區塊顯示）
+                if (state == HardwareState.running)
+                  IconButton(
+                    icon: Icon(
+                      _showAdjacentDetails ? Icons.expand_less : Icons.expand_more,
+                      color: Colors.white,
+                      size: 20,
+                    ),
+                    onPressed: () => setState(() => _showAdjacentDetails = !_showAdjacentDetails),
+                    tooltip: tr('show_adjacent_details'),
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                  ),
+              ],
             ),
           ),
           // 表頭（根據模式選擇不同表頭）
