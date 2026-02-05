@@ -11,6 +11,7 @@ import 'package:flutter/material.dart';
 import '../services/localization_service.dart';
 import '../services/threshold_settings_service.dart';
 import 'data_storage_page.dart';
+import 'detection_rules_page.dart';
 
 class SettingsPage extends StatefulWidget {
   const SettingsPage({super.key});
@@ -27,6 +28,10 @@ class _SettingsPageState extends State<SettingsPage> {
     return ValueListenableBuilder<AppLanguage>(
       valueListenable: LocalizationService().currentLanguageNotifier,
       builder: (context, currentLanguage, _) {
+        // 防止 IndexedStack 同時建立所有頁面時，ThresholdSettingsService 尚未初始化
+        if (!_thresholdService.isInitialized) {
+          return const Center(child: CircularProgressIndicator());
+        }
         return ValueListenableBuilder<int>(
           valueListenable: _thresholdService.settingsUpdateNotifier,
           builder: (context, _, __) {
@@ -40,6 +45,15 @@ class _SettingsPageState extends State<SettingsPage> {
                   const SizedBox(height: 24),
                   // 閾值設定區塊
                   _buildThresholdSection(context),
+                  const SizedBox(height: 24),
+                  // 短路測試設定區塊
+                  _buildShortCircuitTestSection(context),
+                  const SizedBox(height: 24),
+                  // 診斷偵測設定區塊
+                  _buildDiagnosticDetectionSection(context),
+                  const SizedBox(height: 24),
+                  // 檢測規則說明區塊
+                  _buildDetectionRulesSection(context),
                   const SizedBox(height: 24),
                   // 關於區塊
                   _buildAboutSection(context),
@@ -396,6 +410,184 @@ class _SettingsPageState extends State<SettingsPage> {
     );
   }
 
+  /// 建構短路測試設定區塊
+  Widget _buildShortCircuitTestSection(BuildContext context) {
+    return Card(
+      elevation: 2,
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // 標題列
+            Row(
+              children: [
+                Icon(Icons.electrical_services, color: Colors.purple.shade700),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        tr('short_circuit_test_settings'),
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.purple.shade700,
+                        ),
+                      ),
+                      Text(
+                        tr('short_circuit_test_desc'),
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Colors.grey.shade600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            const Divider(height: 24),
+
+            // VDD 短路測試開關
+            SwitchListTile(
+              title: Text(tr('show_vdd_short_test')),
+              subtitle: Text(
+                tr('show_vdd_short_test_desc'),
+                style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+              ),
+              value: _thresholdService.showVddShortTest,
+              onChanged: (value) async {
+                await _thresholdService.setShowVddShortTest(value);
+              },
+              activeTrackColor: Colors.purple.shade300,
+            ),
+
+            const Divider(height: 24),
+
+            // 相鄰短路測試優化開關
+            SwitchListTile(
+              title: Text(tr('adjacent_short_test_optimization')),
+              subtitle: Text(
+                tr('adjacent_short_test_optimization_desc'),
+                style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+              ),
+              value: _thresholdService.adjacentShortTestOptimization,
+              onChanged: (value) async {
+                await _thresholdService.setAdjacentShortTestOptimization(value);
+              },
+              activeTrackColor: Colors.purple.shade300,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 建構診斷偵測設定區塊
+  Widget _buildDiagnosticDetectionSection(BuildContext context) {
+    return Card(
+      elevation: 2,
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // 標題列
+            Row(
+              children: [
+                Icon(Icons.troubleshoot, color: Colors.teal.shade700),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        tr('diagnostic_detection_settings'),
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.teal.shade700,
+                        ),
+                      ),
+                      Text(
+                        tr('diagnostic_detection_desc'),
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Colors.grey.shade600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            const Divider(height: 24),
+
+            // 負載偵測開關
+            SwitchListTile(
+              title: Text(tr('show_load_detection')),
+              subtitle: Text(
+                tr('show_load_detection_desc'),
+                style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+              ),
+              value: _thresholdService.showLoadDetection,
+              onChanged: (value) async {
+                await _thresholdService.setShowLoadDetection(value);
+              },
+              activeTrackColor: Colors.teal.shade300,
+            ),
+
+            // MOSFET 異常偵測開關
+            SwitchListTile(
+              title: Text(tr('show_mosfet_detection')),
+              subtitle: Text(
+                tr('show_mosfet_detection_desc'),
+                style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+              ),
+              value: _thresholdService.showMosfetDetection,
+              onChanged: (value) async {
+                await _thresholdService.setShowMosfetDetection(value);
+              },
+              activeTrackColor: Colors.teal.shade300,
+            ),
+
+            // ===== GPIO 狀態偵測開關（暫時隱藏）=====
+            // 原因：與 MOSFET 診斷功能重疊，且缺乏實際數據驗證
+            // 保留程式碼供未來使用
+            // SwitchListTile(
+            //   title: Text(tr('show_gpio_status_detection')),
+            //   subtitle: Text(
+            //     tr('show_gpio_status_detection_desc'),
+            //     style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+            //   ),
+            //   value: _thresholdService.showGpioStatusDetection,
+            //   onChanged: (value) async {
+            //     await _thresholdService.setShowGpioStatusDetection(value);
+            //   },
+            //   activeTrackColor: Colors.teal.shade300,
+            // ),
+
+            // 線材錯誤偵測開關
+            SwitchListTile(
+              title: Text(tr('show_wire_error_detection')),
+              subtitle: Text(
+                tr('show_wire_error_detection_desc'),
+                style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+              ),
+              value: _thresholdService.showWireErrorDetection,
+              onChanged: (value) async {
+                await _thresholdService.setShowWireErrorDetection(value);
+              },
+              activeTrackColor: Colors.teal.shade300,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   /// 顯示閾值編輯對話框
   void _showThresholdEditDialog(DeviceType device, StateType state, String title, Color color) {
     final thresholds = _thresholdService.getAllHardwareThresholds(device, state);
@@ -488,6 +680,67 @@ class _SettingsPageState extends State<SettingsPage> {
             child: Text(tr('confirm')),
           ),
         ],
+      ),
+    );
+  }
+
+  /// 建構檢測規則說明區塊
+  Widget _buildDetectionRulesSection(BuildContext context) {
+    return Card(
+      elevation: 2,
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // 標題
+            Row(
+              children: [
+                Icon(Icons.rule, color: Colors.teal.shade700),
+                const SizedBox(width: 8),
+                Text(
+                  tr('detection_rules_title'),
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.teal.shade700,
+                  ),
+                ),
+              ],
+            ),
+            const Divider(height: 24),
+            // 說明文字
+            Text(
+              tr('detection_rules_desc'),
+              style: TextStyle(
+                color: Colors.grey.shade600,
+                fontSize: 14,
+              ),
+            ),
+            const SizedBox(height: 16),
+            // 按鈕
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                onPressed: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => const DetectionRulesPage(),
+                    ),
+                  );
+                },
+                icon: const Icon(Icons.open_in_new),
+                label: Text(tr('detection_rules_title')),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.teal,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

@@ -53,6 +53,11 @@ class SerialPortManager {
   /// 參數: (int id, int value)
   void Function(int id, int value)? onDataReceived;
 
+  /// GPIO 命令確認回調（STM32 專用）
+  /// 當收到 0x01(開啟) 或 0x02(關閉) 命令的回應時觸發
+  /// 參數: (int command, int bitMask) - command 為 0x01 或 0x02，bitMask 為受影響的腳位
+  void Function(int command, int bitMask)? onGpioCommandConfirmed;
+
   /// 韌體版本通知器（格式: "0.0.0.X"）
   final ValueNotifier<String?> firmwareVersionNotifier = ValueNotifier(null);
 
@@ -469,8 +474,8 @@ class SerialPortManager {
     'slot5': 5, 'slot6': 6, 'slot7': 7, 'slot8': 8, 'slot9': 9,
     // WATER 對應 ID 10
     'water': 10,
-    // UVC 燈對應 ID 11-13
-    'mainuvc': 11, 'spoutuvc': 12, 'mixuvc': 13,
+    // UVC 燈對應 ID 11-13 (u0=SpoutUVC, u1=MixUVC, u2=MainUVC)
+    'spoutuvc': 11, 'mixuvc': 12, 'mainuvc': 13,
     // 繼電器對應 ID 14-16
     'ambientrl': 14, 'coolrl': 15, 'sparking': 16,
     // O3 對應 ID 17
@@ -564,8 +569,28 @@ class SerialPortManager {
 
     final command = data[3];
 
+    // GPIO 開啟命令回應 (0x01)
+    if (command == 0x01) {
+      final lowByte = data[4];
+      final midByte = data[5];
+      final highByte = data[6];
+      final bitMask = lowByte | (midByte << 8) | (highByte << 16);
+      _updateActivityTime();
+      onGpioCommandConfirmed?.call(0x01, bitMask);
+      return false;  // 不是心跳回應
+    }
+    // GPIO 關閉命令回應 (0x02)
+    else if (command == 0x02) {
+      final lowByte = data[4];
+      final midByte = data[5];
+      final highByte = data[6];
+      final bitMask = lowByte | (midByte << 8) | (highByte << 16);
+      _updateActivityTime();
+      onGpioCommandConfirmed?.call(0x02, bitMask);
+      return false;  // 不是心跳回應
+    }
     // 讀取命令回應 (0x03)
-    if (command == 0x03) {
+    else if (command == 0x03) {
       final id = data[4];
       final value = data[5] | (data[6] << 8) | (data[7] << 16);
       final result = _formatReadResult(id, value);
@@ -614,10 +639,10 @@ class SerialPortManager {
     9: {'icon': '⚙️', 'name': 'SLOT10', 'isTemp': false},
     // water: 水泵
     10: {'icon': '💧', 'name': 'WATERPUMP', 'isTemp': false},
-    // u0~u2: 紫外殺菌燈
-    11: {'icon': '💡', 'name': 'MainUVC', 'isTemp': false},
-    12: {'icon': '💡', 'name': 'SpoutUVC', 'isTemp': false},
-    13: {'icon': '💡', 'name': 'MixUVC', 'isTemp': false},
+    // u0~u2: 紫外殺菌燈 (u0=SpoutUVC, u1=MixUVC, u2=MainUVC)
+    11: {'icon': '💡', 'name': 'SpoutUVC', 'isTemp': false},
+    12: {'icon': '💡', 'name': 'MixUVC', 'isTemp': false},
+    13: {'icon': '💡', 'name': 'MainUVC', 'isTemp': false},
     // relay
     14: {'icon': '🔌', 'name': 'AmbientRL', 'isTemp': false},
     15: {'icon': '🔌', 'name': 'CoolRL', 'isTemp': false},

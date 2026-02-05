@@ -25,13 +25,16 @@ import 'services/data_storage_service.dart';
 import 'services/localization_service.dart';
 import 'services/threshold_settings_service.dart';
 import 'services/stlink_programmer_service.dart';
+import 'services/cli_checker_service.dart';
 import 'widgets/arduino_panel.dart';
+import 'widgets/cli_check_dialog.dart';
 import 'widgets/ur_panel.dart';
 import 'widgets/data_storage_page.dart';
 import 'widgets/auto_detection_page.dart';
 import 'widgets/settings_page.dart';
 import 'widgets/splash_screen.dart';
 import 'widgets/firmware_upload_page.dart';
+import 'widgets/operation_page.dart';
 import 'controllers/auto_detection_controller.dart';
 import 'controllers/serial_controller.dart';
 import 'controllers/firmware_controller.dart';
@@ -120,7 +123,7 @@ class _MainNavigationPageState extends State<MainNavigationPage>
   Timer? _flowReadTimer;
 
   /// 即時訊息（顯示在 AppBar 中）
-  String _statusMessage = '';
+  final ValueNotifier<String> _statusMessage = ValueNotifier('');
 
   /// 訊息清除計時器
   Timer? _messageTimer;
@@ -156,6 +159,27 @@ class _MainNavigationPageState extends State<MainNavigationPage>
 
   /// 當前正在讀取的區域類型（idle / running / sensor）
   String? _currentReadingSection;
+
+  /// 次要高亮的項目 ID 列表（用於短路測試中顯示所有相鄰腳位）
+  List<int>? _secondaryReadingIds;
+
+  /// 慢速調試模式
+  bool _isSlowDebugMode = false;
+
+  /// 調試模式暫停狀態
+  bool _isDebugPaused = false;
+
+  /// 調試訊息
+  String? _debugMessage;
+
+  /// 調試歷史當前索引（1-based）
+  int _debugHistoryIndex = 0;
+
+  /// 調試歷史總數
+  int _debugHistoryTotal = 0;
+
+  /// 相鄰腳位短路測試數據（用於新模式在 Running 區域顯示）
+  Map<int, List<AdjacentIdleData>> _adjacentIdleData = {};
 
   // ==================== ST-Link 燒入相關狀態 ====================
 
@@ -264,10 +288,11 @@ class _MainNavigationPageState extends State<MainNavigationPage>
   }
 
   @override
-  void setCurrentReadingState(int? id, String? section) {
+  void setCurrentReadingState(int? id, String? section, [List<int>? secondaryIds]) {
     setState(() {
       _currentReadingId = id;
       _currentReadingSection = section;
+      _secondaryReadingIds = secondaryIds;
     });
   }
 
@@ -276,6 +301,7 @@ class _MainNavigationPageState extends State<MainNavigationPage>
     setState(() {
       _currentReadingId = null;
       _currentReadingSection = null;
+      _secondaryReadingIds = null;
     });
   }
 
@@ -290,8 +316,79 @@ class _MainNavigationPageState extends State<MainNavigationPage>
     bool passed,
     List<String> failedIdleItems,
     List<String> failedRunningItems,
-    List<String> failedSensorItems,
-  ) => _showTestResultDialog(passed, failedIdleItems, failedRunningItems, failedSensorItems);
+    List<String> failedSensorItems, {
+    List<String> vddShortItems = const [],
+    List<String> vssShortItems = const [],
+    List<String> adjacentShortItems = const [],
+    List<String> loadDisconnectedItems = const [],
+    List<String> gsShortItems = const [],
+    List<String> gpioStuckOnItems = const [],
+    List<String> gpioStuckOffItems = const [],
+    List<String> wireErrorItems = const [],
+    List<String> d12vShortItems = const [],
+  }) => _showTestResultDialog(
+    passed,
+    failedIdleItems,
+    failedRunningItems,
+    failedSensorItems,
+    vddShortItems: vddShortItems,
+    vssShortItems: vssShortItems,
+    adjacentShortItems: adjacentShortItems,
+    loadDisconnectedItems: loadDisconnectedItems,
+    gsShortItems: gsShortItems,
+    gpioStuckOnItems: gpioStuckOnItems,
+    gpioStuckOffItems: gpioStuckOffItems,
+    wireErrorItems: wireErrorItems,
+    d12vShortItems: d12vShortItems,
+  );
+
+  @override
+  bool get isSlowDebugMode => _isSlowDebugMode;
+
+  @override
+  bool get isDebugPaused => _isDebugPaused;
+
+  @override
+  void setDebugPaused(bool paused) {
+    if (mounted) {
+      setState(() => _isDebugPaused = paused);
+    }
+  }
+
+  @override
+  void setDebugMessage(String message) {
+    if (mounted) {
+      setState(() => _debugMessage = message);
+    }
+  }
+
+  @override
+  void setDebugHistoryState(int index, int total) {
+    if (mounted) {
+      setState(() {
+        _debugHistoryIndex = index;
+        _debugHistoryTotal = total;
+      });
+    }
+  }
+
+  @override
+  void setAdjacentIdleData(int runningId, List<AdjacentIdleData> data) {
+    if (mounted) {
+      setState(() {
+        _adjacentIdleData[runningId] = data;
+      });
+    }
+  }
+
+  @override
+  void clearAdjacentIdleData() {
+    if (mounted) {
+      setState(() {
+        _adjacentIdleData.clear();
+      });
+    }
+  }
 
   // ==================== SerialController Mixin 實作 ====================
 
@@ -433,6 +530,11 @@ class _MainNavigationPageState extends State<MainNavigationPage>
       }
     };
 
+    // 設置 STM32 GPIO 命令確認回調（用於自動檢測流程）
+    _urManager.onGpioCommandConfirmed = (int command, int bitMask) {
+      handleGpioCommandConfirmed(command, bitMask);
+    };
+
     // 設置 Arduino 心跳失敗回調
     _arduinoManager.onHeartbeatFailed = () {
       _handleArduinoHeartbeatFailed();
@@ -447,7 +549,49 @@ class _MainNavigationPageState extends State<MainNavigationPage>
       _refreshPorts();
       _startPortMonitor();  // 啟動 COM 埠監控
       _initStLinkService(); // 初始化 ST-Link 服務
+      _checkRequiredCli();  // 檢查必要的 CLI 工具
     });
+  }
+
+  /// 檢查必要的 CLI 工具
+  Future<void> _checkRequiredCli() async {
+    CliCheckResult checkResult = await CliCheckerService.checkAllCli();
+
+    // 如果所有 CLI 都已安裝，直接返回
+    if (checkResult.allCliReady) return;
+
+    // 顯示檢查對話框
+    if (!mounted) return;
+
+    // 使用遞迴方式避免 async gap 問題
+    _showCliCheckDialogLoop(checkResult);
+  }
+
+  /// 顯示 CLI 檢查對話框（遞迴處理重新檢查）
+  Future<void> _showCliCheckDialogLoop(CliCheckResult checkResult) async {
+    if (!mounted) return;
+
+    final continueAnyway = await showCliCheckDialog(context, checkResult);
+
+    if (!mounted) return;
+
+    if (continueAnyway) {
+      // 使用者選擇略過，繼續使用程式
+      return;
+    }
+
+    // 使用者選擇重新檢查
+    final newResult = await CliCheckerService.checkAllCli();
+
+    if (!mounted) return;
+
+    if (newResult.allCliReady) {
+      // 現在都安裝好了
+      _showSnackBar('STM32CubeProgrammer CLI ${tr('cli_status_installed')}');
+    } else {
+      // 還是沒安裝，再次顯示對話框
+      _showCliCheckDialogLoop(newResult);
+    }
   }
 
   /// 初始化 ST-Link 服務
@@ -533,6 +677,7 @@ class _MainNavigationPageState extends State<MainNavigationPage>
     _dataStorage.dispose();
     _urHexController.dispose();
     _flowController.dispose();
+    _statusMessage.dispose();
     super.dispose();
   }
 
@@ -669,11 +814,14 @@ class _MainNavigationPageState extends State<MainNavigationPage>
 
   // ==================== 串口操作 ====================
 
-  /// 刷新可用 COM 埠列表
+  /// 刷新可用 COM 埠列表和韌體檔案
   void _refreshPorts() {
     setState(() {
       _availablePorts = SerialPort.availablePorts;
     });
+
+    // 同時刷新韌體檔案列表
+    _scanFirmwareFiles();
 
     if (_availablePorts.isEmpty) {
       _showSnackBar(tr('no_com_port'));
@@ -684,54 +832,73 @@ class _MainNavigationPageState extends State<MainNavigationPage>
 
   void _showSnackBar(String message) {
     _messageTimer?.cancel();
-    setState(() {
-      _statusMessage = message;
-    });
-    // 2 秒後自動清除訊息
+    _statusMessage.value = message;
     _messageTimer = Timer(const Duration(seconds: 2), () {
       if (mounted) {
-        setState(() {
-          _statusMessage = '';
-        });
+        _statusMessage.value = '';
       }
     });
   }
 
-  /// 顯示錯誤提示對話框（畫面中央，2秒後自動關閉）
+  /// 顯示錯誤提示對話框（畫面中央，2秒後自動關閉，或點擊關閉，帶淡入縮放動畫）
   void _showErrorDialog(String message) {
-    showDialog(
+    showGeneralDialog(
       context: context,
-      barrierDismissible: false,
+      barrierDismissible: true,
+      barrierLabel: '',
       barrierColor: Colors.black54,
-      builder: (BuildContext dialogContext) {
-        // 2秒後自動關閉
-        Future.delayed(const Duration(seconds: 2), () {
-          if (mounted && Navigator.of(dialogContext).canPop()) {
-            Navigator.of(dialogContext).pop();
-          }
-        });
-
-        return AlertDialog(
-          backgroundColor: Colors.red.shade50,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
-            side: BorderSide(color: Colors.red.shade400, width: 2),
-          ),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(Icons.error_outline, color: Colors.red.shade700, size: 64),
-              const SizedBox(height: 16),
-              Text(
-                message,
-                style: TextStyle(
-                  fontSize: 20,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.red.shade800,
-                ),
-                textAlign: TextAlign.center,
+      transitionDuration: const Duration(milliseconds: 200),
+      pageBuilder: (context, animation, secondaryAnimation) {
+        return const SizedBox.shrink();
+      },
+      transitionBuilder: (dialogContext, animation, secondaryAnimation, child) {
+        if (animation.status == AnimationStatus.completed) {
+          Future.delayed(const Duration(seconds: 2), () {
+            if (mounted && Navigator.of(dialogContext).canPop()) {
+              Navigator.of(dialogContext).pop();
+            }
+          });
+        }
+        return FadeTransition(
+          opacity: animation,
+          child: ScaleTransition(
+            scale: Tween<double>(begin: 0.95, end: 1.0).animate(
+              CurvedAnimation(parent: animation, curve: Curves.easeOut),
+            ),
+            child: AlertDialog(
+              backgroundColor: Colors.red.shade50,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16),
+                side: BorderSide(color: Colors.red.shade400, width: 2),
               ),
-            ],
+              content: InkWell(
+                onTap: () => Navigator.of(dialogContext).pop(),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.error_outline, color: Colors.red.shade700, size: 64),
+                    const SizedBox(height: 16),
+                    Text(
+                      message,
+                      style: TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.red.shade800,
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      '(點擊關閉)',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.grey.shade600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
           ),
         );
       },
@@ -786,21 +953,26 @@ class _MainNavigationPageState extends State<MainNavigationPage>
                 Text(_getPageTitle()),
                 const SizedBox(width: 16),
                 // 即時訊息顯示
-                if (_statusMessage.isNotEmpty)
-                  Expanded(
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: Colors.black54,
-                        borderRadius: BorderRadius.circular(16),
+                ValueListenableBuilder<String>(
+                  valueListenable: _statusMessage,
+                  builder: (context, msg, _) {
+                    if (msg.isEmpty) return const SizedBox.shrink();
+                    return Expanded(
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: Colors.black54,
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                        child: Text(
+                          msg,
+                          style: const TextStyle(fontSize: 12, color: Colors.white),
+                          overflow: TextOverflow.ellipsis,
+                        ),
                       ),
-                      child: Text(
-                        _statusMessage,
-                        style: const TextStyle(fontSize: 12, color: Colors.white),
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                  ),
+                    );
+                  },
+                ),
               ],
             ),
             backgroundColor: Theme.of(context).colorScheme.inversePrimary,
@@ -832,6 +1004,8 @@ class _MainNavigationPageState extends State<MainNavigationPage>
         return tr('page_firmware_upload');
       case 4:
         return tr('page_settings');
+      case 5:
+        return tr('page_operation');
       default:
         return tr('page_auto_detection');
     }
@@ -890,8 +1064,11 @@ class _MainNavigationPageState extends State<MainNavigationPage>
             selected: _selectedPageIndex == 0,
             selectedTileColor: Colors.blue.shade50,
             onTap: () {
-              setState(() => _selectedPageIndex = 0);
+              if (_selectedPageIndex != 0) {
+                setState(() => _selectedPageIndex = 0);
+              }
               Navigator.pop(context);
+              _scanFirmwareFiles();
             },
           ),
           // 頁面選項 2: 命令控制
@@ -901,7 +1078,9 @@ class _MainNavigationPageState extends State<MainNavigationPage>
             selected: _selectedPageIndex == 1,
             selectedTileColor: Colors.blue.shade50,
             onTap: () {
-              setState(() => _selectedPageIndex = 1);
+              if (_selectedPageIndex != 1) {
+                setState(() => _selectedPageIndex = 1);
+              }
               Navigator.pop(context);
             },
           ),
@@ -912,7 +1091,9 @@ class _MainNavigationPageState extends State<MainNavigationPage>
             selected: _selectedPageIndex == 2,
             selectedTileColor: Colors.blue.shade50,
             onTap: () {
-              setState(() => _selectedPageIndex = 2);
+              if (_selectedPageIndex != 2) {
+                setState(() => _selectedPageIndex = 2);
+              }
               Navigator.pop(context);
             },
           ),
@@ -923,7 +1104,9 @@ class _MainNavigationPageState extends State<MainNavigationPage>
             selected: _selectedPageIndex == 3,
             selectedTileColor: Colors.blue.shade50,
             onTap: () {
-              setState(() => _selectedPageIndex = 3);
+              if (_selectedPageIndex != 3) {
+                setState(() => _selectedPageIndex = 3);
+              }
               Navigator.pop(context);
             },
           ),
@@ -934,7 +1117,22 @@ class _MainNavigationPageState extends State<MainNavigationPage>
             selected: _selectedPageIndex == 4,
             selectedTileColor: Colors.blue.shade50,
             onTap: () {
-              setState(() => _selectedPageIndex = 4);
+              if (_selectedPageIndex != 4) {
+                setState(() => _selectedPageIndex = 4);
+              }
+              Navigator.pop(context);
+            },
+          ),
+          // 頁面選項 6: 操作畫面
+          ListTile(
+            leading: const Icon(Icons.touch_app),
+            title: Text(tr('page_operation')),
+            selected: _selectedPageIndex == 5,
+            selectedTileColor: Colors.blue.shade50,
+            onTap: () {
+              if (_selectedPageIndex != 5) {
+                setState(() => _selectedPageIndex = 5);
+              }
               Navigator.pop(context);
             },
           ),
@@ -1001,7 +1199,7 @@ class _MainNavigationPageState extends State<MainNavigationPage>
     );
   }
 
-  /// 建構頁面內容
+  /// 建構頁面內容（使用 switch-case 每次只建構當前頁面）
   Widget _buildBody() {
     switch (_selectedPageIndex) {
       case 0:
@@ -1017,6 +1215,8 @@ class _MainNavigationPageState extends State<MainNavigationPage>
         );
       case 4:
         return const SettingsPage();
+      case 5:
+        return _buildOperationPage();
       default:
         return _buildAutoDetectionPage();
     }
@@ -1033,9 +1233,7 @@ class _MainNavigationPageState extends State<MainNavigationPage>
             selectedPort: _selectedArduinoPort,
             availablePorts: _availablePorts,
             flowController: _flowController,
-            onPortChanged: (value) {
-              setState(() => _selectedArduinoPort = value);
-            },
+            onPortChanged: _onArduinoPortChanged,
             onConnect: connectArduino,
             onDisconnect: disconnectArduino,
             onSendCommand: sendArduinoCommand,
@@ -1049,9 +1247,7 @@ class _MainNavigationPageState extends State<MainNavigationPage>
             selectedPort: _selectedUrPort,
             availablePorts: _availablePorts,
             hexController: _urHexController,
-            onPortChanged: (value) {
-              setState(() => _selectedUrPort = value);
-            },
+            onPortChanged: _onStm32PortChanged,
             onConnect: connectUr,
             onDisconnect: disconnectUr,
             onSendPayload: sendUrCommand,
@@ -1059,6 +1255,22 @@ class _MainNavigationPageState extends State<MainNavigationPage>
           ),
         ),
       ],
+    );
+  }
+
+  /// 建構操作畫面
+  Widget _buildOperationPage() {
+    return OperationPage(
+      urManager: _urManager,
+      availablePorts: _availablePorts,
+      selectedUrPort: _selectedUrPort,
+      arduinoPortName: _arduinoManager.currentPortName,
+      isStm32Connected: _urManager.isConnected,
+      onConnectStm32: connectUr,
+      onDisconnectStm32: disconnectUr,
+      onStm32PortChanged: _onStm32PortChanged,
+      onSendUrCommand: sendUrCommand,
+      onShowSnackBar: _showSnackBar,
     );
   }
 
@@ -1080,13 +1292,58 @@ class _MainNavigationPageState extends State<MainNavigationPage>
     bool passed,
     List<String> failedIdleItems,
     List<String> failedRunningItems,
-    List<String> failedSensorItems,
-  ) {
-    showDialog(
+    List<String> failedSensorItems, {
+    List<String> vddShortItems = const [],
+    List<String> vssShortItems = const [],
+    List<String> adjacentShortItems = const [],
+    List<String> loadDisconnectedItems = const [],
+    List<String> gsShortItems = const [],
+    List<String> gpioStuckOnItems = const [],
+    List<String> gpioStuckOffItems = const [],
+    List<String> wireErrorItems = const [],
+    List<String> d12vShortItems = const [],
+  }) {
+    // 取得短路測試顯示設定
+    final thresholdService = ThresholdSettingsService();
+    final showVdd = thresholdService.showVddShortTest;
+    // Vss 短路目前隱藏（保留變數供未來擴展）
+    // final showVss = thresholdService.showVssShortTest;
+
+    // 檢查是否有短路問題（根據設定過濾）
+    // Vss 短路目前隱藏，不參與判斷
+    // D極與12V短路總是顯示（屬於 MOSFET 診斷的一部分）
+    final hasShortCircuit = (showVdd && vddShortItems.isNotEmpty) ||
+                            adjacentShortItems.isNotEmpty ||
+                            d12vShortItems.isNotEmpty;
+
+    // 檢查是否有診斷問題（根據設定過濾）
+    final showLoadDetection = thresholdService.showLoadDetection;
+    final showMosfetDetection = thresholdService.showMosfetDetection;
+    final showGpioStatusDetection = thresholdService.showGpioStatusDetection;
+    final showWireErrorDetection = thresholdService.showWireErrorDetection;
+    // GPIO 狀態偵測暫時停用（與 MOSFET 診斷功能重疊）
+    final hasDiagnosticIssue = (showLoadDetection && loadDisconnectedItems.isNotEmpty) ||
+                               (showMosfetDetection && gsShortItems.isNotEmpty) ||
+                               // (showGpioStatusDetection && (gpioStuckOnItems.isNotEmpty || gpioStuckOffItems.isNotEmpty)) ||
+                               (showWireErrorDetection && wireErrorItems.isNotEmpty);
+
+    showGeneralDialog(
       context: context,
       barrierDismissible: true,
-      builder: (BuildContext dialogContext) {
-        return AlertDialog(
+      barrierLabel: '',
+      barrierColor: Colors.black54,
+      transitionDuration: const Duration(milliseconds: 200),
+      pageBuilder: (context, animation, secondaryAnimation) {
+        return const SizedBox.shrink();
+      },
+      transitionBuilder: (dialogContext, animation, secondaryAnimation, child) {
+        return FadeTransition(
+          opacity: animation,
+          child: ScaleTransition(
+            scale: Tween<double>(begin: 0.95, end: 1.0).animate(
+              CurvedAnimation(parent: animation, curve: Curves.easeOut),
+            ),
+            child: AlertDialog(
           backgroundColor: passed ? Colors.green.shade50 : Colors.red.shade50,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(16),
@@ -1121,56 +1378,191 @@ class _MainNavigationPageState extends State<MainNavigationPage>
                   ),
                 )
               : SizedBox(
-                  width: 600,  // 固定寬度以容納三欄
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        tr('test_failed_items'),
-                        style: TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.red.shade800,
+                  width: (hasShortCircuit || hasDiagnosticIssue) ? 800 : 600,  // 有短路或診斷問題時加寬
+                  child: SingleChildScrollView(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          tr('test_failed_items'),
+                          style: TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.red.shade800,
+                          ),
                         ),
-                      ),
-                      const SizedBox(height: 12),
-                      // 三欄顯示
-                      ConstrainedBox(
-                        constraints: const BoxConstraints(maxHeight: 250),
-                        child: Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            // 左欄：Idle 異常
-                            Expanded(
-                              child: _buildFailedColumn(
-                                title: 'Idle',
-                                items: failedIdleItems,
-                                color: Colors.orange,
+                        const SizedBox(height: 12),
+                        // 第一列：Idle、Running、感測器異常
+                        ConstrainedBox(
+                          constraints: const BoxConstraints(maxHeight: 200),
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              // 左欄：Idle 異常
+                              Expanded(
+                                child: _buildFailedColumn(
+                                  title: 'Idle',
+                                  items: failedIdleItems,
+                                  color: Colors.orange,
+                                ),
                               ),
-                            ),
-                            const SizedBox(width: 8),
-                            // 中欄：Running 異常
-                            Expanded(
-                              child: _buildFailedColumn(
-                                title: 'Running',
-                                items: failedRunningItems,
-                                color: Colors.red,
+                              const SizedBox(width: 8),
+                              // 中欄：Running 異常
+                              Expanded(
+                                child: _buildFailedColumn(
+                                  title: 'Running',
+                                  items: failedRunningItems,
+                                  color: Colors.red,
+                                ),
                               ),
-                            ),
-                            const SizedBox(width: 8),
-                            // 右欄：感測器異常
-                            Expanded(
-                              child: _buildFailedColumn(
-                                title: tr('sensor'),
-                                items: failedSensorItems,
-                                color: Colors.purple,
+                              const SizedBox(width: 8),
+                              // 右欄：感測器異常
+                              Expanded(
+                                child: _buildFailedColumn(
+                                  title: tr('sensor'),
+                                  items: failedSensorItems,
+                                  color: Colors.purple,
+                                ),
                               ),
-                            ),
-                          ],
+                            ],
+                          ),
                         ),
-                      ),
-                    ],
+                        // 第二列：短路測試結果（如果有）
+                        if (hasShortCircuit) ...[
+                          const SizedBox(height: 16),
+                          const Divider(),
+                          const SizedBox(height: 8),
+                          ConstrainedBox(
+                            constraints: const BoxConstraints(maxHeight: 180),
+                            child: Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                // Vdd 短路（根據設定顯示）
+                                if (showVdd)
+                                  Expanded(
+                                    child: _buildFailedColumn(
+                                      title: tr('vdd_short_detected'),
+                                      items: vddShortItems,
+                                      color: Colors.deepOrange,
+                                    ),
+                                  ),
+                                if (showVdd && adjacentShortItems.isNotEmpty)
+                                  const SizedBox(width: 8),
+                                // Vss 短路目前隱藏（保留程式碼供未來擴展）
+                                // if (showVss)
+                                //   Expanded(
+                                //     child: _buildFailedColumn(
+                                //       title: tr('vss_short_detected'),
+                                //       items: vssShortItems,
+                                //       color: Colors.brown,
+                                //     ),
+                                //   ),
+                                // if (showVss && adjacentShortItems.isNotEmpty)
+                                //   const SizedBox(width: 8),
+                                // 相鄰腳位短路（總是顯示，沒有設定開關）
+                                Expanded(
+                                  child: _buildFailedColumn(
+                                    title: tr('adjacent_short_detected'),
+                                    items: adjacentShortItems,
+                                    color: Colors.indigo,
+                                  ),
+                                ),
+                                if (d12vShortItems.isNotEmpty)
+                                  const SizedBox(width: 8),
+                                // D極與12V短路（MOSFET 診斷，總是顯示）
+                                if (d12vShortItems.isNotEmpty)
+                                  Expanded(
+                                    child: _buildFailedColumn(
+                                      title: tr('d12v_short_detected'),
+                                      items: d12vShortItems,
+                                      color: Colors.red.shade800,
+                                    ),
+                                  ),
+                              ],
+                            ),
+                          ),
+                        ],
+                        // 第三列：診斷偵測結果（如果有）
+                        if (hasDiagnosticIssue) ...[
+                          const SizedBox(height: 16),
+                          const Divider(),
+                          const SizedBox(height: 8),
+                          Text(
+                            tr('diag_detail_title'),
+                            style: TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.teal.shade800,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          ConstrainedBox(
+                            constraints: const BoxConstraints(maxHeight: 180),
+                            child: Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                // 負載未連接（根據設定顯示）
+                                if (showLoadDetection)
+                                  Expanded(
+                                    child: _buildFailedColumn(
+                                      title: tr('diag_load_disconnected'),
+                                      items: loadDisconnectedItems,
+                                      color: Colors.grey,
+                                    ),
+                                  ),
+                                if (showLoadDetection && (showMosfetDetection || showGpioStatusDetection))
+                                  const SizedBox(width: 8),
+                                // G-S 短路（根據設定顯示）
+                                if (showMosfetDetection)
+                                  Expanded(
+                                    child: _buildFailedColumn(
+                                      title: tr('diag_gs_short'),
+                                      items: gsShortItems,
+                                      color: Colors.deepOrange,
+                                    ),
+                                  ),
+                                // GPIO 狀態偵測暫時停用（與 MOSFET 診斷功能重疊）
+                                // 保留程式碼供未來使用
+                                // if (showMosfetDetection && showGpioStatusDetection)
+                                //   const SizedBox(width: 8),
+                                // // GPIO 卡在 ON（根據設定顯示）
+                                // if (showGpioStatusDetection)
+                                //   Expanded(
+                                //     child: _buildFailedColumn(
+                                //       title: tr('diag_gpio_stuck_on'),
+                                //       items: gpioStuckOnItems,
+                                //       color: Colors.amber.shade700,
+                                //     ),
+                                //   ),
+                                // if (showGpioStatusDetection && gpioStuckOffItems.isNotEmpty)
+                                //   const SizedBox(width: 8),
+                                // // GPIO 卡在 OFF（根據設定顯示）
+                                // if (showGpioStatusDetection)
+                                //   Expanded(
+                                //     child: _buildFailedColumn(
+                                //       title: tr('diag_gpio_stuck_off'),
+                                //       items: gpioStuckOffItems,
+                                //       color: Colors.blueGrey,
+                                //     ),
+                                //   ),
+                                if (showWireErrorDetection && wireErrorItems.isNotEmpty)
+                                  const SizedBox(width: 8),
+                                // 線材錯誤（根據設定顯示）
+                                if (showWireErrorDetection)
+                                  Expanded(
+                                    child: _buildFailedColumn(
+                                      title: tr('diag_wire_error'),
+                                      items: wireErrorItems,
+                                      color: Colors.brown,
+                                    ),
+                                  ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
                   ),
                 ),
           actions: [
@@ -1185,6 +1577,8 @@ class _MainNavigationPageState extends State<MainNavigationPage>
               ),
             ),
           ],
+            ),
+          ),
         );
       },
     );
@@ -1289,12 +1683,8 @@ class _MainNavigationPageState extends State<MainNavigationPage>
       isArduinoConnected: _arduinoManager.isConnected,
       isStm32Connected: _urManager.isConnected,
       stm32FirmwareVersion: _urManager.firmwareVersionNotifier.value,
-      onArduinoPortChanged: (port) {
-        setState(() => _selectedArduinoPort = port);
-      },
-      onStm32PortChanged: (port) {
-        setState(() => _selectedUrPort = port);
-      },
+      onArduinoPortChanged: _onArduinoPortChanged,
+      onStm32PortChanged: _onStm32PortChanged,
       onArduinoConnect: connectArduino,
       onArduinoDisconnect: disconnectArduino,
       onStm32Connect: connectUr,
@@ -1307,6 +1697,7 @@ class _MainNavigationPageState extends State<MainNavigationPage>
       autoDetectionProgress: _autoDetectionProgress,
       currentReadingId: _currentReadingId,
       currentReadingSection: _currentReadingSection,
+      secondaryReadingIds: _secondaryReadingIds,
       // ST-Link 燒入相關
       isStLinkConnected: _isStLinkConnected,
       stLinkInfo: _stLinkInfo,
@@ -1316,16 +1707,82 @@ class _MainNavigationPageState extends State<MainNavigationPage>
       isProgramming: _isProgramming,
       programProgress: _programProgress,
       programStatus: _programStatus,
-      onFirmwareSelected: (path) {
-        setState(() => _selectedFirmwarePath = path);
-      },
-      onStLinkFrequencyChanged: (freq) {
-        setState(() => _stLinkFrequency = freq);
-        _stLinkService.setFrequency(freq);
-      },
+      onFirmwareSelected: _onFirmwareSelected,
+      onStLinkFrequencyChanged: _onStLinkFrequencyChanged,
       onStartProgramAndDetect: _startProgramAndDetect,
       onCheckStLink: _checkStLinkConnection,
+      onShowResultDialog: _showCurrentTestResult,
+      // 慢速調試模式
+      isSlowDebugMode: _isSlowDebugMode,
+      onToggleSlowDebugMode: _toggleSlowDebugMode,
+      debugMessage: _debugMessage,
+      debugHistoryIndex: _debugHistoryIndex,
+      debugHistoryTotal: _debugHistoryTotal,
+      onDebugHistoryPrev: debugHistoryPrev,
+      onDebugHistoryNext: debugHistoryNext,
+      isDebugPaused: _isDebugPaused,
+      onToggleDebugPause: _toggleDebugPause,
+      // 相鄰短路顯示模式
+      adjacentIdleData: _adjacentIdleData,
+      onToggleAdjacentDisplayMode: _toggleAdjacentDisplayMode,
+      adjacentDisplayInRunning: ThresholdSettingsService().adjacentShortDisplayInRunning,
     );
+  }
+
+  // ==================== 命名回調方法 ====================
+
+  void _onArduinoPortChanged(String? port) {
+    setState(() => _selectedArduinoPort = port);
+  }
+
+  void _onStm32PortChanged(String? port) {
+    setState(() => _selectedUrPort = port);
+  }
+
+  void _onFirmwareSelected(String? path) {
+    setState(() => _selectedFirmwarePath = path);
+  }
+
+  void _onStLinkFrequencyChanged(int freq) {
+    setState(() => _stLinkFrequency = freq);
+    _stLinkService.setFrequency(freq);
+  }
+
+  /// 切換相鄰短路顯示模式
+  void _toggleAdjacentDisplayMode() {
+    final thresholdService = ThresholdSettingsService();
+    final newValue = !thresholdService.adjacentShortDisplayInRunning;
+    thresholdService.setAdjacentShortDisplayInRunning(newValue);
+    setState(() {});  // 觸發 UI 更新
+  }
+
+  /// 切換慢速調試模式
+  void _toggleSlowDebugMode() {
+    setState(() {
+      _isSlowDebugMode = !_isSlowDebugMode;
+      if (!_isSlowDebugMode) {
+        _debugMessage = null;  // 關閉時清除調試訊息
+        _debugHistoryIndex = 0;
+        _debugHistoryTotal = 0;
+        _isDebugPaused = false;  // 關閉時也取消暫停
+      }
+    });
+    _showSnackBar(_isSlowDebugMode
+        ? tr('slow_debug_mode_on')
+        : tr('slow_debug_mode_off'));
+  }
+
+  /// 切換調試暫停狀態
+  void _toggleDebugPause() {
+    setState(() {
+      _isDebugPaused = !_isDebugPaused;
+    });
+  }
+
+  /// 顯示當前檢測結果（可隨時查看）
+  void _showCurrentTestResult() {
+    // 調用 mixin 中的方法來顯示結果
+    showCurrentResult();
   }
 
   /// 燒入並自動檢測

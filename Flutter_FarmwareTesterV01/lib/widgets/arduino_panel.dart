@@ -49,7 +49,7 @@ class ArduinoPanel extends StatelessWidget {
   /// Arduino 指令分組（按 ID 順序排列）
   /// ID 0-9: s0-s9 (馬達)
   /// ID 10: water (水泵)
-  /// ID 11-13: u0-u2 (紫外燈)
+  /// ID 11-13: u0-u2 (紫外燈) - u0=SpoutUVC, u1=MixUVC, u2=MainUVC
   /// ID 14-16: arl, crl, srl (繼電器)
   /// ID 17: o3 (臭氧)
   /// ID 18: flowon/flowoff (流量)

@@ -4,7 +4,16 @@
       "Bash(cmd /c \"timeout /t 30 && type C:\\\\Users\\\\AQUIVIO\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\c--flutter-Test1-flutter-application-1\\\\tasks\\\\ba52259.output\")",
       "Bash(cmd /c:*)",
       "Bash(powershell -Command \"cd ''c:\\\\flutter\\\\Test1\\\\flutter_application_1''; flutter run -d windows\")",
-      "Bash(powershell -Command \"Set-Location ''c:\\\\flutter\\\\Test1\\\\flutter_application_1''; & ''C:\\\\flutter\\\\flutter\\\\bin\\\\flutter.bat'' run -d windows\")"
+      "Bash(powershell -Command \"Set-Location ''c:\\\\flutter\\\\Test1\\\\flutter_application_1''; & ''C:\\\\flutter\\\\flutter\\\\bin\\\\flutter.bat'' run -d windows\")",
+      "Bash(C:/flutter/flutter/bin/flutter.bat analyze lib/controllers/auto_detection_controller.dart lib/main.dart)",
+      "Bash(flutter analyze:*)",
+      "Bash(/c/flutter/flutter/bin/flutter.bat analyze:*)",
+      "Bash(dart analyze:*)",
+      "Bash(C:/flutter/sdk/bin/flutter.bat analyze lib/services/threshold_settings_service.dart lib/widgets/settings_page.dart lib/controllers/auto_detection_controller.dart lib/services/localization_service.dart)",
+      "Bash(where:*)",
+      "Bash(C:flutterflutterbinflutter.bat analyze lib/controllers/auto_detection_controller.dart)",
+      "Bash(powershell -Command:*)",
+      "Bash(/c/flutter/flutter/bin/dart analyze:*)"
     ]
   }
 }

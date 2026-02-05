@@ -47,10 +47,10 @@ class DisplayNames {
     9: 'Slot9',
     // Water: 水泵
     10: 'WaterPump',
-    // UVC 燈
-    11: 'MainUVC',
-    12: 'SpoutUVC',
-    13: 'MixUVC',
+    // UVC 燈 (u0=SpoutUVC, u1=MixUVC, u2=MainUVC)
+    11: 'SpoutUVC',
+    12: 'MixUVC',
+    13: 'MainUVC',
     // 繼電器
     14: 'AmbientRL',
     15: 'CoolRL',
@@ -66,8 +66,18 @@ class DisplayNames {
     23: 'BIBtemp',
   };
 
-  /// 取得顯示名稱
+  /// 取得顯示名稱（包含 ID）
+  /// 例如：Slot0 (ID0), WaterPump (ID10)
   static String getName(int id) {
+    final name = idToDisplayName[id];
+    if (name != null) {
+      return '$name (ID$id)';
+    }
+    return 'ID$id';
+  }
+
+  /// 取得純名稱（不含 ID）
+  static String getNameOnly(int id) {
     return idToDisplayName[id] ?? 'ID$id';
   }
 }
