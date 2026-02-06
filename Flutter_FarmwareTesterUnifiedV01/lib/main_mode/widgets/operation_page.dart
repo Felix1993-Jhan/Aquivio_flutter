@@ -9,7 +9,7 @@
 
 import 'package:flutter/material.dart';
 import 'package:flutter_firmware_tester_unified/shared/services/localization_service.dart';
-import '../services/serial_port_manager.dart';
+import 'package:flutter_firmware_tester_unified/shared/services/serial_port_manager.dart';
 import '../services/ur_command_builder.dart';
 
 class OperationPage extends StatefulWidget {
@@ -141,7 +141,7 @@ class _OperationPageState extends State<OperationPage> {
   Widget build(BuildContext context) {
     return ValueListenableBuilder<AppLanguage>(
       valueListenable: LocalizationService().currentLanguageNotifier,
-      builder: (context, _, __) {
+      builder: (context, _, _) {
         return Padding(
           padding: const EdgeInsets.all(24.0),
           child: Column(

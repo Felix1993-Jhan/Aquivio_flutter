@@ -37,7 +37,8 @@
       "Bash(del \"lib\\\\bodydoor_mode\\\\services\\\\localization_service.dart\")",
       "Bash(del \"lib\\\\main_mode\\\\widgets\\\\ui_dialogs.dart\")",
       "Bash(del \"lib\\\\bodydoor_mode\\\\widgets\\\\ui_dialogs.dart\")",
-      "Bash(git rev-parse:*)"
+      "Bash(git rev-parse:*)",
+      "Bash(\"C:/flutter/flutter/bin/flutter.bat\" analyze)"
     ]
   }
 }

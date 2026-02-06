@@ -306,20 +306,6 @@ class _DataStoragePageState extends State<DataStoragePage> {
     }
   }
 
-  /// 停止所有批次讀取
-  void _stopAllBatchRead() {
-    setState(() {
-      _isArduinoHardwareBatchReading = false;
-      _isArduinoSensorBatchReading = false;
-      _isStm32HardwareBatchReading = false;
-      _isStm32SensorBatchReading = false;
-      _arduinoHardwareReadingId = null;
-      _arduinoSensorReadingId = null;
-      _stm32HardwareReadingId = null;
-      _stm32SensorReadingId = null;
-    });
-  }
-
   /// 建構批次讀取按鈕
   Widget _buildBatchReadButton({
     required String label,
@@ -384,13 +370,13 @@ class _DataStoragePageState extends State<DataStoragePage> {
     // 監聽語言變更，自動更新 UI
     return ValueListenableBuilder<AppLanguage>(
       valueListenable: LocalizationService().currentLanguageNotifier,
-      builder: (context, _, __) {
+      builder: (context, _, _) {
         return ValueListenableBuilder<int>(
           valueListenable: widget.dataStorage.dataUpdateNotifier,
-          builder: (context, _, __) {
+          builder: (context, _, _) {
             return ValueListenableBuilder<int>(
               valueListenable: widget.dataStorage.runningStateNotifier,
-              builder: (context, _, __) {
+              builder: (context, _, _) {
                 return Column(
                   children: [
                     // 頂部控制列

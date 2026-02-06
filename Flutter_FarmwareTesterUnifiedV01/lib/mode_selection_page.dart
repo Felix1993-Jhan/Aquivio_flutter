@@ -10,14 +10,14 @@
 // ============================================================================
 
 import 'dart:async';
-import 'dart:convert';
-import 'dart:typed_data';
 import 'package:flutter/material.dart';
-import 'package:flutter_libserialport/flutter_libserialport.dart';
 import 'package:flutter_firmware_tester_unified/config/app_mode.dart';
 import 'package:flutter_firmware_tester_unified/main_mode/main_navigation_page.dart';
 import 'package:flutter_firmware_tester_unified/bodydoor_mode/bodydoor_navigation_page.dart';
 import 'package:flutter_firmware_tester_unified/shared/language_state.dart';
+import 'package:flutter_firmware_tester_unified/shared/services/arduino_connection_service.dart';
+import 'package:flutter_firmware_tester_unified/shared/services/port_filter_service.dart';
+import 'package:flutter_firmware_tester_unified/shared/services/serial_port_manager.dart';
 
 class ModeSelectionPage extends StatefulWidget {
   const ModeSelectionPage({super.key});
@@ -44,8 +44,8 @@ class _ModeSelectionPageState extends State<ModeSelectionPage> {
   /// 是否已跳轉（防止重複跳轉）
   bool _navigated = false;
 
-  /// 當前正在探測的串口（用於清理）
-  SerialPort? _probePort;
+  /// 用於探測的 SerialPortManager
+  SerialPortManager? _probeManager;
 
   // ==================== 生命週期 ====================
 
@@ -70,18 +70,13 @@ class _ModeSelectionPageState extends State<ModeSelectionPage> {
   void _stopAutoDetect() {
     _retryTimer?.cancel();
     _retryTimer = null;
-    _closeProbePort();
+    _closeProbeManager();
   }
 
-  /// 關閉探測用的串口
-  void _closeProbePort() {
-    try {
-      _probePort?.close();
-    } catch (_) {}
-    try {
-      _probePort?.dispose();
-    } catch (_) {}
-    _probePort = null;
+  /// 關閉探測用的 SerialPortManager
+  void _closeProbeManager() {
+    _probeManager?.close();
+    _probeManager = null;
   }
 
   /// 開始自動偵測 Arduino
@@ -93,10 +88,10 @@ class _ModeSelectionPageState extends State<ModeSelectionPage> {
       _scanStatus = _isChinese ? '正在偵測 Arduino...' : 'Detecting Arduino...';
     });
 
-    // 取得所有可用 COM 埠
+    // 取得所有可用 COM 埠（排除 ST-Link）
     List<String> ports;
     try {
-      ports = SerialPort.availablePorts;
+      ports = PortFilterService.getAvailablePorts(excludeStLink: true);
     } catch (e) {
       ports = [];
     }
@@ -166,84 +161,45 @@ class _ModeSelectionPageState extends State<ModeSelectionPage> {
   }
 
   /// 探測單一串口，回傳偵測到的模式（null 表示未偵測到）
+  /// 使用統一的 SerialPortManager.connectAndVerify() 方法
   Future<AppMode?> _probeSerialPort(String portName) async {
-    _closeProbePort();
+    _closeProbeManager();
+
+    if (_navigated || !mounted) return null;
 
     try {
-      _probePort = SerialPort(portName);
+      // 建立臨時的 SerialPortManager 用於探測
+      _probeManager = SerialPortManager('Probe');
 
-      if (!_probePort!.openReadWrite()) {
-        _closeProbePort();
-        return null;
-      }
-
-      // 設定串口參數: 115200, 8N1
-      final config = SerialPortConfig();
-      config.baudRate = 115200;
-      config.bits = 8;
-      config.parity = SerialPortParity.none;
-      config.stopBits = 1;
-      config.setFlowControl(SerialPortFlowControl.none);
-      config.rts = SerialPortRts.off;
-      config.dtr = SerialPortDtr.off;
-      _probePort!.config = config;
-
-      // 等待 Arduino 重置初始化
-      await Future.delayed(const Duration(milliseconds: 1000));
+      // 使用統一的連線驗證方法
+      final result = await _probeManager!.connectAndVerify(portName);
 
       if (_navigated || !mounted) {
-        _closeProbePort();
+        _closeProbeManager();
         return null;
       }
 
-      // 發送 "connect\n" 指令
-      final connectCmd = Uint8List.fromList('connect\n'.codeUnits);
-      try {
-        _probePort!.write(connectCmd);
-      } catch (e) {
-        _closeProbePort();
-        return null;
-      }
+      // 根據連線結果和偵測到的模式決定回傳值
+      if (result == ConnectResult.success || result == ConnectResult.wrongMode) {
+        // 不論是 success 還是 wrongMode，都代表偵測到了 Arduino
+        // 差別只在於 Main SerialPortManager 期待的是 connectedmain
+        final detectedMode = _probeManager!.detectedMode;
+        _closeProbeManager();
 
-      // 等待回應（最多 2 秒，每 100ms 檢查一次）
-      final buffer = <int>[];
-      for (int wait = 0; wait < 20; wait++) {
-        await Future.delayed(const Duration(milliseconds: 100));
-
-        if (_navigated || !mounted) {
-          _closeProbePort();
-          return null;
-        }
-
-        // 讀取可用資料
-        try {
-          final available = _probePort!.bytesAvailable;
-          if (available > 0) {
-            final data = _probePort!.read(available);
-            buffer.addAll(data);
-
-            // 檢查是否收到完整回應（含換行符）
-            final response = utf8
-                .decode(buffer, allowMalformed: true)
-                .toLowerCase();
-            if (response.contains('connectedmain')) {
-              _closeProbePort();
-              return AppMode.main;
-            }
-            if (response.contains('connectedbodydoor')) {
-              _closeProbePort();
-              return AppMode.bodyDoor;
-            }
-          }
-        } catch (_) {
-          // 讀取錯誤，跳過
+        switch (detectedMode) {
+          case ArduinoMode.main:
+            return AppMode.main;
+          case ArduinoMode.bodyDoor:
+            return AppMode.bodyDoor;
+          case ArduinoMode.unknown:
+            return null;
         }
       }
 
-      _closeProbePort();
+      _closeProbeManager();
       return null;
     } catch (e) {
-      _closeProbePort();
+      _closeProbeManager();
       return null;
     }
   }

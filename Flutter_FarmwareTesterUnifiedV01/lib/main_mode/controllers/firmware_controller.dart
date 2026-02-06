@@ -78,10 +78,6 @@ mixin FirmwareController<T extends StatefulWidget> on State<T> {
         reset: true,
       );
 
-      setState(() {
-        isProgramming = false;
-      });
-
       if (result.success) {
         // 燒入成功，顯示翻譯後的訊息
         String message;
@@ -97,15 +93,28 @@ mixin FirmwareController<T extends StatefulWidget> on State<T> {
         showSnackBarMessage(message);
 
         // 等待 STM32 啟動完成（STM32 重置後需要約 8 秒啟動時間）
+        // 使用倒數計時讓現場人員知道程式正在等待
+        // 注意：保持 isProgramming = true 以便進度條繼續顯示
+        const int waitSeconds = 8;
+        for (int remaining = waitSeconds; remaining > 0; remaining--) {
+          setState(() {
+            programStatus = trParams('waiting_stm32_startup_countdown', {'seconds': remaining.toString()});
+          });
+          await Future.delayed(const Duration(seconds: 1));
+        }
+
+        // 倒數完成後才關閉燒錄狀態
         setState(() {
-          programStatus = tr('waiting_stm32_startup');
+          isProgramming = false;
         });
-        await Future.delayed(const Duration(milliseconds: 8000));
 
         // 開始自動檢測流程
         startAutoDetectionProcess();
       } else {
         // 燒入失敗，顯示錯誤訊息
+        setState(() {
+          isProgramming = false;
+        });
         String message;
         if (result.messageKey != null) {
           message = tr(result.messageKey!);

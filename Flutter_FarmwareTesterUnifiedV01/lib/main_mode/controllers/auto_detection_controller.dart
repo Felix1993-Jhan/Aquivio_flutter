@@ -8,8 +8,11 @@
 
 import 'dart:async';
 import 'package:flutter/material.dart';
-import '../services/serial_port_manager.dart';
+import 'package:flutter_firmware_tester_unified/shared/services/serial_port_manager.dart';
 import 'package:flutter_firmware_tester_unified/shared/services/data_storage_service.dart';
+import 'package:flutter_firmware_tester_unified/shared/services/arduino_connection_service.dart';
+import 'package:flutter_firmware_tester_unified/shared/services/port_filter_service.dart';
+import 'package:flutter_firmware_tester_unified/shared/controllers/debug_history_mixin.dart';
 import '../services/ur_command_builder.dart';
 import 'package:flutter_firmware_tester_unified/shared/services/localization_service.dart';
 import '../services/threshold_settings_service.dart';
@@ -19,12 +22,13 @@ import '../widgets/auto_detection_page.dart' show AdjacentIdleData, AdjacentData
 
 /// 自動檢測控制器 Mixin
 /// 使用類別需要實作抽象的 getter 和 setter
-mixin AutoDetectionController<T extends StatefulWidget> on State<T> {
+mixin AutoDetectionController<T extends StatefulWidget> on State<T>, DebugHistoryMixin<T> {
 
   // ===== 必須由使用者實作的抽象成員 =====
 
   // 狀態存取
   bool get isAutoDetecting;
+  @override
   bool get isAutoDetectionCancelled;
   DataStorageService get dataStorage;
   SerialPortManager get arduinoManager;
@@ -63,81 +67,14 @@ mixin AutoDetectionController<T extends StatefulWidget> on State<T> {
     List<String> d12vShortItems = const [],
   });
 
-  // 慢速調試模式
-  bool get isSlowDebugMode;
-  void setDebugMessage(String message);
-  void setDebugHistoryState(int index, int total);
-
-  // 調試模式暫停控制
-  bool get isDebugPaused;
-  void setDebugPaused(bool paused);
-
   // 相鄰腳位短路測試數據傳遞
   void setAdjacentIdleData(int runningId, List<AdjacentIdleData> data);
   void clearAdjacentIdleData();
 
   // ==================== 自動檢測流程 ====================
 
-  // ===== 調試訊息歷史記錄 =====
-  final List<String> _debugHistory = [];
-  int _debugHistoryIndex = 0;
-
-  /// 添加調試訊息到歷史記錄
-  void _addDebugHistory(String message) {
-    _debugHistory.add(message);
-    _debugHistoryIndex = _debugHistory.length - 1;
-    setDebugMessage(message);
-    setDebugHistoryState(_debugHistoryIndex + 1, _debugHistory.length);
-  }
-
-  /// 查看上一條調試訊息
-  void debugHistoryPrev() {
-    if (_debugHistory.isEmpty) return;
-    if (_debugHistoryIndex > 0) {
-      _debugHistoryIndex--;
-      setDebugMessage(_debugHistory[_debugHistoryIndex]);
-      setDebugHistoryState(_debugHistoryIndex + 1, _debugHistory.length);
-    }
-  }
-
-  /// 查看下一條調試訊息
-  void debugHistoryNext() {
-    if (_debugHistory.isEmpty) return;
-    if (_debugHistoryIndex < _debugHistory.length - 1) {
-      _debugHistoryIndex++;
-      setDebugMessage(_debugHistory[_debugHistoryIndex]);
-      setDebugHistoryState(_debugHistoryIndex + 1, _debugHistory.length);
-    }
-  }
-
-  /// 清除調試歷史
-  void clearDebugHistory() {
-    _debugHistory.clear();
-    _debugHistoryIndex = 0;
-    setDebugHistoryState(0, 0);
-  }
-
-  /// 等待暫停解除（在暫停狀態時持續等待）
-  Future<void> _waitIfPaused() async {
-    while (isDebugPaused && !isAutoDetectionCancelled) {
-      await Future.delayed(const Duration(milliseconds: 100));
-    }
-  }
-
-  /// 調試模式延遲（包含暫停檢查）
-  Future<void> _debugDelay(Duration duration) async {
-    // 先檢查是否暫停
-    await _waitIfPaused();
-    if (isAutoDetectionCancelled) return;
-
-    // 將延遲時間分成小段，每段檢查暫停狀態
-    final endTime = DateTime.now().add(duration);
-    while (DateTime.now().isBefore(endTime) && !isAutoDetectionCancelled) {
-      await Future.delayed(const Duration(milliseconds: 100));
-      // 如果被暫停，等待解除後繼續計時
-      await _waitIfPaused();
-    }
-  }
+  // 注意：調試歷史相關功能（debugHistoryPrev/Next、clearDebugHistory、
+  // waitIfPaused、debugDelay）已移至 DebugHistoryMixin
 
   /// 更新自動檢測狀態
   void updateAutoDetectionStatus(String status, double progress) {
@@ -389,13 +326,17 @@ mixin AutoDetectionController<T extends StatefulWidget> on State<T> {
 
   /// 步驟 1: 連接設備
   /// 先逐一嘗試連接 Arduino，成功後再逐一嘗試連接 STM32
+  /// 會自動排除 ST-Link VCP 埠口
   Future<bool> _autoDetectionStep1Connect() async {
     // 先刷新 COM 埠列表，確保有最新的可用埠
     refreshPorts();
     await Future.delayed(const Duration(milliseconds: 300));
 
+    // 取得可用的 COM 埠（排除 ST-Link VCP）
+    final filteredPorts = PortFilterService.getAvailablePorts(excludeStLink: true);
+
     // 檢查是否有可用的 COM 埠
-    if (availablePorts.isEmpty) {
+    if (filteredPorts.isEmpty) {
       showSnackBarMessage(tr('usb_not_connected'));
       return false;
     }
@@ -407,16 +348,16 @@ mixin AutoDetectionController<T extends StatefulWidget> on State<T> {
       // 建立要嘗試的 COM 埠列表
       // 如果已選擇的埠有效，優先嘗試；否則從第一個開始
       final portsToTry = <String>[];
-      if (selectedArduinoPort != null && availablePorts.contains(selectedArduinoPort)) {
+      if (selectedArduinoPort != null && filteredPorts.contains(selectedArduinoPort)) {
         portsToTry.add(selectedArduinoPort!);
-        portsToTry.addAll(availablePorts.where((p) => p != selectedArduinoPort));
+        portsToTry.addAll(filteredPorts.where((p) => p != selectedArduinoPort));
       } else {
-        portsToTry.addAll(availablePorts);
+        portsToTry.addAll(filteredPorts);
       }
 
       bool arduinoConnected = false;
 
-      // 逐一嘗試每個 COM 埠
+      // 逐一嘗試每個 COM 埠，使用統一的連線驗證方法
       for (int i = 0; i < portsToTry.length && !arduinoConnected; i++) {
         if (isAutoDetectionCancelled) return false;
 
@@ -426,37 +367,23 @@ mixin AutoDetectionController<T extends StatefulWidget> on State<T> {
           0.02 + (i * 0.02)
         );
 
-        // 嘗試開啟連接埠
-        if (arduinoManager.open(port)) {
-          // 等待一下讓連接穩定（Arduino 重置後需要時間初始化）
-          await Future.delayed(const Duration(milliseconds: 1000));
+        // 使用統一的連線驗證方法
+        final result = await arduinoManager.connectAndVerify(port);
 
-          // 發送 connect 指令驗證是否為 Arduino（與心跳機制相同）
-          // Arduino 收到 "connect" 會回傳 "connected"
-          arduinoManager.sendString('connect');
-
-          // 等待回應，透過心跳機制的 heartbeatOkNotifier 判斷
-          bool gotResponse = false;
-          for (int wait = 0; wait < 10; wait++) {
-            await Future.delayed(const Duration(milliseconds: 200));
-            if (arduinoManager.heartbeatOkNotifier.value) {
-              gotResponse = true;
-              break;
-            }
-          }
-
-          if (gotResponse) {
-            // 確認是 Arduino，連接成功
-            arduinoManager.startHeartbeat();
+        switch (result) {
+          case ConnectResult.success:
+            // Main Arduino 連接成功
             arduinoConnected = true;
             setSelectedArduinoPort(port);
-
-            // 清除測試數據
             dataStorage.clearAllData();
-          } else {
-            // 不是 Arduino，關閉連接，嘗試下一個
-            arduinoManager.close();
-          }
+            break;
+          case ConnectResult.wrongMode:
+            // 偵測到 BodyDoor Arduino，跳過
+            break;
+          case ConnectResult.failed:
+          case ConnectResult.portError:
+            // 連線失敗，嘗試下一個
+            break;
         }
 
         // 短暫延遲再嘗試下一個
@@ -479,10 +406,11 @@ mixin AutoDetectionController<T extends StatefulWidget> on State<T> {
     if (!urManager.isConnected) {
       updateAutoDetectionStatus(tr('connecting_stm32'), 0.08);
 
-      // 取得剩餘可用的 COM 埠（排除 Arduino 使用的）
-      final availableForStm32 = availablePorts
-          .where((p) => p != arduinoManager.currentPortName)
-          .toList();
+      // 取得剩餘可用的 COM 埠（排除 Arduino 使用的和 ST-Link）
+      final availableForStm32 = PortFilterService.getFilteredPorts(
+        excludePorts: [arduinoManager.currentPortName ?? ''],
+        excludeStLink: true,
+      );
 
       if (availableForStm32.isEmpty) {
         showSnackBarMessage(tr('usb_not_connected'));
@@ -500,7 +428,7 @@ mixin AutoDetectionController<T extends StatefulWidget> on State<T> {
 
       bool stm32Connected = false;
 
-      // 逐一嘗試每個 COM 埠
+      // 逐一嘗試每個 COM 埠，使用統一的連線驗證方法
       for (int i = 0; i < portsToTry.length && !stm32Connected; i++) {
         if (isAutoDetectionCancelled) return false;
 
@@ -510,25 +438,12 @@ mixin AutoDetectionController<T extends StatefulWidget> on State<T> {
           0.08 + (i * 0.02)
         );
 
-        // 嘗試開啟連接埠
-        if (urManager.open(port)) {
-          // 發送韌體版本查詢來驗證是否為 STM32
-          final payload = [0x05, 0x00, 0x00, 0x00, 0x00];
-          final cmd = URCommandBuilder.buildCommand(payload);
-          urManager.sendHex(cmd);
+        // 使用統一的連線驗證方法
+        final result = await urManager.connectAndVerifyStm32(port);
 
-          // 等待驗證回應
-          await Future.delayed(const Duration(milliseconds: 1500));
-
-          if (urManager.firmwareVersionNotifier.value != null) {
-            // 確認是 STM32，連接成功
-            urManager.startHeartbeat();
-            stm32Connected = true;
-            setSelectedUrPort(port);
-          } else {
-            // 不是 STM32，關閉連接，嘗試下一個
-            urManager.close();
-          }
+        if (result == Stm32ConnectResult.success) {
+          stm32Connected = true;
+          setSelectedUrPort(port);
         }
 
         // 短暫延遲再嘗試下一個
@@ -979,7 +894,7 @@ mixin AutoDetectionController<T extends StatefulWidget> on State<T> {
           }
         }
 
-        _addDebugHistory(buffer.toString());
+        addDebugHistory(buffer.toString());
       }
 
       // 傳遞相鄰腳位數據到 UI（新模式在 Running 區域顯示）
@@ -990,7 +905,7 @@ mixin AutoDetectionController<T extends StatefulWidget> on State<T> {
 
       // 慢速調試模式：數據顯示完成後才開始等待（支援暫停）
       if (isSlowDebugMode && adjacentTestResults.isNotEmpty) {
-        await _debugDelay(const Duration(seconds: 3));
+        await debugDelay(const Duration(seconds: 3));
       }
 
       // 關閉測試腳位的 GPIO（等待 STM32 確認回應）

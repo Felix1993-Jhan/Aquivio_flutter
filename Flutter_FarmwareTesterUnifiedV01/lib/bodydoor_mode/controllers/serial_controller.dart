@@ -7,7 +7,9 @@
 // ============================================================================
 
 import 'package:flutter/material.dart';
-import '../services/serial_port_manager.dart';
+import 'package:flutter_firmware_tester_unified/shared/services/serial_port_manager.dart';
+import 'package:flutter_firmware_tester_unified/shared/services/arduino_connection_service.dart';
+import 'package:flutter_firmware_tester_unified/shared/services/port_filter_service.dart';
 import 'package:flutter_firmware_tester_unified/shared/services/localization_service.dart';
 
 /// 串口控制器 Mixin
@@ -20,56 +22,82 @@ mixin SerialController<T extends StatefulWidget> on State<T> {
   String? get selectedArduinoPort;
   set selectedArduinoPort(String? value);
 
+  /// 可用的 COM 埠列表（供自動掃描使用）
+  List<String> get availablePorts;
+
   int get arduinoConnectRetryCount;
   set arduinoConnectRetryCount(int value);
 
   void showSnackBarMessage(String message);
   void showErrorDialogMessage(String message);
 
-  // ==================== 常數 ====================
-
-  /// 連接重試最大次數
-  static const int maxConnectRetry = 6;
+  /// 當偵測到錯誤模式時呼叫（顯示切換模式對話框）
+  void onWrongModeDetected(String portName);
 
   // ==================== Arduino 操作 ====================
 
-  /// 連接 Arduino
-  void connectArduino() {
-    if (selectedArduinoPort == null) {
-      showSnackBarMessage(tr('select_arduino_port'));
+  /// 連接 Arduino（自動掃描所有 COM 埠尋找正確的 Arduino）
+  ///
+  /// 此方法會自動掃描所有可用的 COM 埠，找到正確模式的 Arduino 後連線。
+  /// 與自動偵測使用相同的邏輯，不需要預先選擇 COM 埠。
+  /// 會自動排除 ST-Link VCP 埠口。
+  Future<void> connectArduino() async {
+    // 取得可用埠口（排除 ST-Link）
+    final filteredPorts = PortFilterService.getAvailablePorts(excludeStLink: true);
+
+    if (filteredPorts.isEmpty) {
+      showSnackBarMessage(tr('no_com_port'));
       return;
     }
 
-    arduinoConnectRetryCount = 0;
-    _tryConnectArduino();
-  }
+    showSnackBarMessage(tr('arduino_verifying'));
 
-  /// 嘗試連接 Arduino（支援自動重試）
-  void _tryConnectArduino() {
-    if (selectedArduinoPort == null) return;
-    if (!mounted) return;  // 防止在 dispose 後執行
-
-    if (arduinoManager.open(selectedArduinoPort!)) {
-      arduinoManager.startHeartbeat();
-      if (mounted) setState(() {});
-      showSnackBarMessage(tr('arduino_connected'));
-      arduinoConnectRetryCount = 0;
+    // 建立要嘗試的埠口列表（優先嘗試已選擇的埠口）
+    final List<String> portsToScan = [];
+    if (selectedArduinoPort != null && filteredPorts.contains(selectedArduinoPort)) {
+      portsToScan.add(selectedArduinoPort!);
+      portsToScan.addAll(filteredPorts.where((p) => p != selectedArduinoPort));
     } else {
-      arduinoConnectRetryCount++;
-      if (arduinoConnectRetryCount < maxConnectRetry) {
-        showSnackBarMessage(tr('arduino_connecting')
-            .replaceAll('{current}', '$arduinoConnectRetryCount')
-            .replaceAll('{max}', '$maxConnectRetry'));
-        Future.delayed(const Duration(milliseconds: 500), () {
-          if (mounted && !arduinoManager.isConnected && arduinoConnectRetryCount > 0) {
-            _tryConnectArduino();
-          }
-        });
-      } else {
-        showSnackBarMessage(tr('arduino_connect_failed'));
-        arduinoConnectRetryCount = 0;
+      portsToScan.addAll(filteredPorts);
+    }
+
+    // 逐一嘗試每個 COM 埠
+    for (int i = 0; i < portsToScan.length; i++) {
+      if (!mounted) return;
+
+      final port = portsToScan[i];
+
+      // 更新下拉選單顯示目前正在測試的埠口
+      selectedArduinoPort = port;
+      setState(() {});
+
+      final result = await arduinoManager.connectAndVerify(port);
+
+      if (!mounted) return;
+
+      switch (result) {
+        case ConnectResult.success:
+          // 連線成功
+          setState(() {});
+          showSnackBarMessage(tr('arduino_connected'));
+          return;  // 連線成功，結束掃描
+
+        case ConnectResult.wrongMode:
+          // 偵測到 Main Arduino，顯示切換對話框
+          onWrongModeDetected(port);
+          return;  // 偵測到錯誤模式，結束掃描
+
+        case ConnectResult.failed:
+        case ConnectResult.portError:
+          // 連線失敗，繼續嘗試下一個埠口
+          break;
       }
     }
+
+    // 所有埠口都嘗試完畢仍然失敗，清除選擇狀態
+    selectedArduinoPort = null;
+    setState(() {});
+    showSnackBarMessage(tr('arduino_connect_failed'));
   }
 
   /// 斷開 Arduino 連接

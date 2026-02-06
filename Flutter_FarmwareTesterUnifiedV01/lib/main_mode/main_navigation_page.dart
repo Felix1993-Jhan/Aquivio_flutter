@@ -8,12 +8,12 @@
 import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
-import 'package:flutter_libserialport/flutter_libserialport.dart';
 
 import 'package:flutter_firmware_tester_unified/shared/services/data_storage_service.dart';
+import 'package:flutter_firmware_tester_unified/shared/services/port_filter_service.dart';
 import 'package:flutter_firmware_tester_unified/bodydoor_mode/bodydoor_navigation_page.dart' show BodyDoorNavigationPage;
 import 'package:flutter_firmware_tester_unified/mode_selection_page.dart';
-import 'services/serial_port_manager.dart';
+import 'package:flutter_firmware_tester_unified/shared/services/serial_port_manager.dart';
 import 'package:flutter_firmware_tester_unified/shared/services/localization_service.dart';
 import 'services/threshold_settings_service.dart';
 import 'services/stlink_programmer_service.dart';
@@ -26,6 +26,7 @@ import 'widgets/auto_detection_page.dart';
 import 'widgets/settings_page.dart';
 import 'widgets/firmware_upload_page.dart';
 import 'widgets/operation_page.dart';
+import 'package:flutter_firmware_tester_unified/shared/controllers/debug_history_mixin.dart';
 import 'controllers/auto_detection_controller.dart';
 import 'controllers/serial_controller.dart';
 import 'controllers/firmware_controller.dart';
@@ -45,7 +46,7 @@ class MainNavigationPage extends StatefulWidget {
 }
 
 class _MainNavigationPageState extends State<MainNavigationPage>
-    with AutoDetectionController, SerialController, FirmwareController {
+    with DebugHistoryMixin, AutoDetectionController, SerialController, FirmwareController {
   // ==================== 串口管理器 ====================
 
   final SerialPortManager _arduinoManager =
@@ -83,12 +84,6 @@ class _MainNavigationPageState extends State<MainNavigationPage>
 
   /// 上次偵測到的 COM 埠列表（用於比較變化）
   List<String> _lastDetectedPorts = [];
-
-  /// STM32 連接驗證超時計時器
-  Timer? _urVerificationTimer;
-
-  /// STM32 連接是否已驗證
-  bool _urConnectionVerified = false;
 
   // ==================== 自動檢測流程狀態 ====================
 
@@ -129,7 +124,7 @@ class _MainNavigationPageState extends State<MainNavigationPage>
   int _debugHistoryTotal = 0;
 
   /// 相鄰腳位短路測試數據（用於新模式在 Running 區域顯示）
-  Map<int, List<AdjacentIdleData>> _adjacentIdleData = {};
+  final Map<int, List<AdjacentIdleData>> _adjacentIdleData = {};
 
   // ==================== ST-Link 燒入相關狀態 ====================
 
@@ -367,18 +362,6 @@ class _MainNavigationPageState extends State<MainNavigationPage>
   set flowReadTimer(Timer? value) => _flowReadTimer = value;
 
   @override
-  Timer? get urVerificationTimer => _urVerificationTimer;
-
-  @override
-  set urVerificationTimer(Timer? value) => _urVerificationTimer = value;
-
-  @override
-  bool get urConnectionVerified => _urConnectionVerified;
-
-  @override
-  set urConnectionVerified(bool value) => _urConnectionVerified = value;
-
-  @override
   int get arduinoConnectRetryCount => _arduinoConnectRetryCount;
 
   @override
@@ -393,6 +376,7 @@ class _MainNavigationPageState extends State<MainNavigationPage>
   @override
   void showErrorDialogMessage(String message) => _showErrorDialog(message);
 
+  @override
   void onWrongModeDetected(String portName) => _showWrongModeDialog(portName);
 
   // ==================== FirmwareController Mixin 實作 ====================
@@ -476,13 +460,9 @@ class _MainNavigationPageState extends State<MainNavigationPage>
       });
     };
 
-    // 設置 STM32 連接驗證回調
+    // 設置 STM32 連接驗證回調（connectAndVerifyStm32 已處理心跳啟動）
     _urManager.onConnectionVerified = (bool success) {
-      cancelUrVerificationTimeout();
       if (success) {
-        _urConnectionVerified = true;
-        // 連接驗證成功，啟動心跳機制
-        _urManager.startHeartbeat();
         // 連接驗證成功，發送 flowoff 到 Arduino
         sendArduinoFlowoff();
       }
@@ -671,7 +651,6 @@ class _MainNavigationPageState extends State<MainNavigationPage>
     _portMonitorTimer?.cancel();
     _flowReadTimer?.cancel();
     _messageTimer?.cancel();
-    _urVerificationTimer?.cancel();
     _arduinoManager.wrongModeDetectedNotifier.removeListener(_onWrongModeDetected);
     _arduinoManager.dispose();
     _urManager.dispose();
@@ -699,14 +678,20 @@ class _MainNavigationPageState extends State<MainNavigationPage>
   }
 
   /// 檢查 COM 埠變化
-  void _checkPortChanges() {
+  /// 使用 PortFilterService 排除 ST-Link VCP 埠口
+  /// 使用非同步方法避免阻塞 UI
+  Future<void> _checkPortChanges() async {
     List<String> currentPorts;
     try {
-      currentPorts = SerialPort.availablePorts;
+      // 使用非同步方法在背景執行緒取得埠口列表，避免 UI 卡頓
+      currentPorts = await PortFilterService.getAvailablePortsAsync(excludeStLink: true);
     } catch (e) {
       // 如果獲取失敗，不做任何操作
       return;
     }
+
+    // 檢查 widget 是否仍然掛載
+    if (!mounted) return;
 
     // 找出被移除的 COM 埠
     final removedPorts = _lastDetectedPorts
@@ -790,7 +775,6 @@ class _MainNavigationPageState extends State<MainNavigationPage>
 
   /// 處理 STM32 USB 斷開
   void _handleStm32Disconnected() {
-    cancelUrVerificationTimeout();  // 取消驗證超時
     _urManager.forceClose();  // 強制關閉連接
     if (mounted) {
       setState(() {
@@ -802,7 +786,6 @@ class _MainNavigationPageState extends State<MainNavigationPage>
 
   /// 處理 STM32 心跳失敗（連接可能已斷開或連接錯誤）
   void _handleStm32HeartbeatFailed() {
-    cancelUrVerificationTimeout();  // 取消驗證超時
     sendArduinoFlowoff();  // 發送 flowoff 到 Arduino
     _urManager.forceClose();  // 強制關閉連接
     if (mounted) {
@@ -836,9 +819,10 @@ class _MainNavigationPageState extends State<MainNavigationPage>
   // ==================== 串口操作 ====================
 
   /// 刷新可用 COM 埠列表和韌體檔案
+  /// 使用 PortFilterService 排除 ST-Link VCP 埠口
   void _refreshPorts() {
     setState(() {
-      _availablePorts = SerialPort.availablePorts;
+      _availablePorts = PortFilterService.getAvailablePorts(excludeStLink: true);
     });
 
     // 同時刷新韌體檔案列表
@@ -1035,7 +1019,7 @@ class _MainNavigationPageState extends State<MainNavigationPage>
     // 監聽語言變更，自動更新 UI
     return ValueListenableBuilder<AppLanguage>(
       valueListenable: LocalizationService().currentLanguageNotifier,
-      builder: (context, _, __) {
+      builder: (context, _, _) {
         return Scaffold(
           appBar: AppBar(
             title: Row(
@@ -1996,10 +1980,6 @@ class _MainNavigationPageState extends State<MainNavigationPage>
         reset: true,
       );
 
-      setState(() {
-        _isProgramming = false;
-      });
-
       if (result.success) {
         // 燒入成功，顯示翻譯後的訊息
         String message;
@@ -2014,16 +1994,30 @@ class _MainNavigationPageState extends State<MainNavigationPage>
         }
         _showSnackBar(message);
 
-        // 等待 STM32 啟動完成（STM32 重置後需要約 5 秒啟動時間）
+        // 等待 STM32 啟動完成（STM32 重置後需要約 8 秒啟動時間）
+        // 使用倒數計時讓現場人員知道程式正在等待
+        // 注意：保持 _isProgramming = true 以便進度條繼續顯示
+        const int waitSeconds = 8;
+        for (int remaining = waitSeconds; remaining > 0; remaining--) {
+          if (!mounted) return;
+          setState(() {
+            _programStatus = trParams('waiting_stm32_startup_countdown', {'seconds': remaining.toString()});
+          });
+          await Future.delayed(const Duration(seconds: 1));
+        }
+
+        // 倒數完成後才關閉燒錄狀態
         setState(() {
-          _programStatus = tr('waiting_stm32_startup');
+          _isProgramming = false;
         });
-        await Future.delayed(const Duration(milliseconds: 8000));
 
         // 開始自動檢測流程
         startAutoDetection();
       } else {
         // 燒入失敗，顯示錯誤訊息
+        setState(() {
+          _isProgramming = false;
+        });
         String message;
         if (result.messageKey != null) {
           message = tr(result.messageKey!);

@@ -538,28 +538,6 @@ class StLinkProgrammerService {
     }
   }
 
-  /// 解析進度
-  void _parseProgress(String output) {
-    // 解析燒錄進度
-    if (output.contains('Download in Progress')) {
-      _updateStatus(ProgrammerStatus.programming, 0.3, 'Programming...');
-    } else if (output.contains('File download complete')) {
-      _updateStatus(ProgrammerStatus.verifying, 0.7, 'Verifying...');
-    } else if (output.contains('Verifying')) {
-      _updateStatus(ProgrammerStatus.verifying, 0.8, 'Verifying...');
-    } else if (output.contains('Download verified successfully')) {
-      _updateStatus(ProgrammerStatus.resetting, 0.9, 'Resetting...');
-    }
-
-    // 嘗試解析百分比
-    final percentMatch = RegExp(r'(\d+)%').firstMatch(output);
-    if (percentMatch != null) {
-      final percent = int.tryParse(percentMatch.group(1) ?? '0') ?? 0;
-      final progress = 0.3 + (percent / 100) * 0.4; // 30% - 70%
-      _updateStatus(_status, progress, _statusMessage);
-    }
-  }
-
   /// 更新狀態
   void _updateStatus(ProgrammerStatus status, double progress, String message) {
     _status = status;

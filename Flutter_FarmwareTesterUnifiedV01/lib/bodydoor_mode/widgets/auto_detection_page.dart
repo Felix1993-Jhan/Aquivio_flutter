@@ -183,13 +183,13 @@ class _AutoDetectionPageState extends State<AutoDetectionPage> {
   Widget build(BuildContext context) {
     return ValueListenableBuilder<AppLanguage>(
       valueListenable: LocalizationService().currentLanguageNotifier,
-      builder: (context, _, __) {
+      builder: (context, _, _) {
         return ValueListenableBuilder<int>(
           valueListenable: widget.dataStorage.dataUpdateNotifier,
-          builder: (context, _, __) {
+          builder: (context, _, _) {
             return ValueListenableBuilder<int>(
               valueListenable: widget.dataStorage.runningStateNotifier,
-              builder: (context, _, __) {
+              builder: (context, _, _) {
                 return Stack(
                   children: [
                     Column(

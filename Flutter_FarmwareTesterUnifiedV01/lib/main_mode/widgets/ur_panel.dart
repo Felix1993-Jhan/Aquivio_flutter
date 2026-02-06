@@ -11,7 +11,7 @@
 // ============================================================================
 
 import 'package:flutter/material.dart';
-import '../services/serial_port_manager.dart';
+import 'package:flutter_firmware_tester_unified/shared/services/serial_port_manager.dart';
 import 'package:flutter_firmware_tester_unified/shared/services/localization_service.dart';
 
 /// 天空藍色調
@@ -117,7 +117,7 @@ class _UrPanelState extends State<UrPanel> {
     // 監聽語言變更，自動更新 UI
     return ValueListenableBuilder<AppLanguage>(
       valueListenable: LocalizationService().currentLanguageNotifier,
-      builder: (context, _, __) {
+      builder: (context, _, _) {
         return Container(
           color: _SkyBlueColors.background,
           child: Column(

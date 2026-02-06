@@ -9,20 +9,24 @@
 
 import 'dart:async';
 import 'package:flutter/material.dart';
-import '../services/serial_port_manager.dart';
+import 'package:flutter_firmware_tester_unified/shared/services/serial_port_manager.dart';
 import 'package:flutter_firmware_tester_unified/shared/services/data_storage_service.dart';
+import 'package:flutter_firmware_tester_unified/shared/services/arduino_connection_service.dart';
+import 'package:flutter_firmware_tester_unified/shared/services/port_filter_service.dart';
 import 'package:flutter_firmware_tester_unified/shared/services/localization_service.dart';
+import 'package:flutter_firmware_tester_unified/shared/controllers/debug_history_mixin.dart';
 import '../services/threshold_settings_service.dart';
 import '../widgets/data_storage_page.dart' show DisplayNames;
 
 /// 自動檢測控制器 Mixin
 /// 使用類別需要實作抽象的 getter 和 setter
-mixin AutoDetectionController<T extends StatefulWidget> on State<T> {
+mixin AutoDetectionController<T extends StatefulWidget> on State<T>, DebugHistoryMixin<T> {
 
   // ===== 必須由使用者實作的抽象成員 =====
 
   // 狀態存取
   bool get isAutoDetecting;
+  @override
   bool get isAutoDetectionCancelled;
   DataStorageService get dataStorage;
   SerialPortManager get arduinoManager;
@@ -41,15 +45,6 @@ mixin AutoDetectionController<T extends StatefulWidget> on State<T> {
   void refreshPorts();
   void showSnackBarMessage(String message);
   void showTestResultDialog(bool passed, List<String> failedItems);
-
-  // 慢速調試模式
-  bool get isSlowDebugMode;
-  void setDebugMessage(String message);
-  void setDebugHistoryState(int index, int total);
-
-  // 調試模式暫停控制
-  bool get isDebugPaused;
-  void setDebugPaused(bool paused);
 
   // ==================== 常數 ====================
 
@@ -81,63 +76,8 @@ mixin AutoDetectionController<T extends StatefulWidget> on State<T> {
 
   // ==================== 自動檢測流程 ====================
 
-  // ===== 調試訊息歷史記錄 =====
-  final List<String> _debugHistory = [];
-  int _debugHistoryIndex = 0;
-
-  /// 添加調試訊息到歷史記錄
-  void _addDebugHistory(String message) {
-    _debugHistory.add(message);
-    _debugHistoryIndex = _debugHistory.length - 1;
-    setDebugMessage(message);
-    setDebugHistoryState(_debugHistoryIndex + 1, _debugHistory.length);
-  }
-
-  /// 查看上一條調試訊息
-  void debugHistoryPrev() {
-    if (_debugHistory.isEmpty) return;
-    if (_debugHistoryIndex > 0) {
-      _debugHistoryIndex--;
-      setDebugMessage(_debugHistory[_debugHistoryIndex]);
-      setDebugHistoryState(_debugHistoryIndex + 1, _debugHistory.length);
-    }
-  }
-
-  /// 查看下一條調試訊息
-  void debugHistoryNext() {
-    if (_debugHistory.isEmpty) return;
-    if (_debugHistoryIndex < _debugHistory.length - 1) {
-      _debugHistoryIndex++;
-      setDebugMessage(_debugHistory[_debugHistoryIndex]);
-      setDebugHistoryState(_debugHistoryIndex + 1, _debugHistory.length);
-    }
-  }
-
-  /// 清除調試歷史
-  void clearDebugHistory() {
-    _debugHistory.clear();
-    _debugHistoryIndex = 0;
-    setDebugHistoryState(0, 0);
-  }
-
-  /// 等待暫停解除（在暫停狀態時持續等待）
-  Future<void> _waitIfPaused() async {
-    while (isDebugPaused && !isAutoDetectionCancelled) {
-      await Future.delayed(const Duration(milliseconds: 100));
-    }
-  }
-
-  /// 調試模式延遲（包含暫停檢查）
-  Future<void> _debugDelay(Duration duration) async {
-    await _waitIfPaused();
-    if (isAutoDetectionCancelled) return;
-
-    final endTime = DateTime.now().add(duration);
-    while (DateTime.now().isBefore(endTime) && !isAutoDetectionCancelled) {
-      await Future.delayed(const Duration(milliseconds: 100));
-      await _waitIfPaused();
-    }
-  }
+  // 注意：調試歷史相關功能（debugHistoryPrev/Next、clearDebugHistory、
+  // waitIfPaused、debugDelay）已移至 DebugHistoryMixin
 
   /// 更新自動檢測狀態
   void updateAutoDetectionStatus(String status, double progress) {
@@ -214,7 +154,10 @@ mixin AutoDetectionController<T extends StatefulWidget> on State<T> {
     refreshPorts();
     await Future.delayed(const Duration(milliseconds: 300));
 
-    if (availablePorts.isEmpty) {
+    // 取得可用埠口（排除 ST-Link）
+    final filteredPorts = PortFilterService.getAvailablePorts(excludeStLink: true);
+
+    if (filteredPorts.isEmpty) {
       showSnackBarMessage(tr('usb_not_connected'));
       return false;
     }
@@ -224,18 +167,18 @@ mixin AutoDetectionController<T extends StatefulWidget> on State<T> {
 
     updateAutoDetectionStatus(tr('connecting_arduino'), 0.02);
 
-    // 建立要嘗試的 COM 埠列表
+    // 建立要嘗試的 COM 埠列表（優先嘗試已選擇的埠口）
     final portsToTry = <String>[];
-    if (selectedArduinoPort != null && availablePorts.contains(selectedArduinoPort)) {
+    if (selectedArduinoPort != null && filteredPorts.contains(selectedArduinoPort)) {
       portsToTry.add(selectedArduinoPort!);
-      portsToTry.addAll(availablePorts.where((p) => p != selectedArduinoPort));
+      portsToTry.addAll(filteredPorts.where((p) => p != selectedArduinoPort));
     } else {
-      portsToTry.addAll(availablePorts);
+      portsToTry.addAll(filteredPorts);
     }
 
     bool arduinoConnected = false;
 
-    // 逐一嘗試每個 COM 埠
+    // 逐一嘗試每個 COM 埠，使用統一的連線驗證方法
     for (int i = 0; i < portsToTry.length && !arduinoConnected; i++) {
       if (isAutoDetectionCancelled) return false;
 
@@ -245,31 +188,25 @@ mixin AutoDetectionController<T extends StatefulWidget> on State<T> {
         0.02 + (i * 0.02)
       );
 
-      if (arduinoManager.open(port)) {
-        // 等待 Arduino 初始化
-        await Future.delayed(const Duration(milliseconds: 1000));
+      // 使用統一的連線驗證方法
+      final result = await arduinoManager.connectAndVerify(port);
 
-        // 發送測試指令驗證是否為 BodyDoor Arduino
-        arduinoManager.sendString('ambientrl');
-        await Future.delayed(const Duration(milliseconds: 1000));
-
-        // 檢查是否收到有效回應
-        final testData = dataStorage.getArduinoLatestIdleData(0) ??
-                        dataStorage.getArduinoLatestRunningData(0);
-
-        if (testData != null) {
-          // 確認是 Arduino，連接成功
-          arduinoManager.startHeartbeat();
+      switch (result) {
+        case ConnectResult.success:
+          // BodyDoor Arduino 連接成功
           arduinoConnected = true;
           setSelectedArduinoPort(port);
-
-          // 清除測試數據
-          dataStorage.clearAllData();
-        } else {
-          arduinoManager.close();
-        }
+          break;
+        case ConnectResult.wrongMode:
+          // 偵測到 Main Arduino，跳過
+          break;
+        case ConnectResult.failed:
+        case ConnectResult.portError:
+          // 連線失敗，嘗試下一個
+          break;
       }
 
+      // 短暫延遲再嘗試下一個
       if (!arduinoConnected && i < portsToTry.length - 1) {
         await Future.delayed(const Duration(milliseconds: 200));
       }
@@ -417,8 +354,8 @@ mixin AutoDetectionController<T extends StatefulWidget> on State<T> {
         final name = DisplayNames.getName(id);
         final group = DisplayNames.isBody(id) ? 'Body' : 'Door';
         final value = data?.value ?? 'N/A';
-        _addDebugHistory('[$group] ID$id ($name): $value');
-        await _debugDelay(const Duration(seconds: 1));
+        addDebugHistory('[$group] ID$id ($name): $value');
+        await debugDelay(const Duration(seconds: 1));
       }
     }
 

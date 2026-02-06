@@ -289,13 +289,13 @@ class _DataStoragePageState extends State<DataStoragePage> {
     // 監聽語言變更，自動更新 UI
     return ValueListenableBuilder<AppLanguage>(
       valueListenable: LocalizationService().currentLanguageNotifier,
-      builder: (context, _, __) {
+      builder: (context, _, _) {
         return ValueListenableBuilder<int>(
           valueListenable: widget.dataStorage.dataUpdateNotifier,
-          builder: (context, _, __) {
+          builder: (context, _, _) {
             return ValueListenableBuilder<int>(
               valueListenable: widget.dataStorage.runningStateNotifier,
-              builder: (context, _, __) {
+              builder: (context, _, _) {
                 return _buildArduinoSection();
               },
             );

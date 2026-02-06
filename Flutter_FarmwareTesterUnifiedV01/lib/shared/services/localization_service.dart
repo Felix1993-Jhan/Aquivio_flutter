@@ -225,6 +225,7 @@ class LocalizationService {
       'output_closed': '關閉',
 
       // 錯誤訊息
+      'arduino_port_error': '無法開啟 Arduino 串口',
       'enter_payload': '請輸入 payload (不含 header 和 CS)',
       'hex_length_error': '16進制字串長度必須為偶數',
       'parse_error': '解析錯誤: {error}',
@@ -274,9 +275,9 @@ class LocalizationService {
 
       // 短路測試設定（僅 Main 使用）
       'short_circuit_test_settings': '短路測試設定',
-      'short_circuit_test_desc': '設定���否顯示 VDD/VSS 短路測試結果',
+      'short_circuit_test_desc': '設定是否顯示 VDD/VSS 短路測試結果',
       'show_vdd_short_test': '顯示 VDD 短路測試',
-      'show_vdd_short_test_desc': '電源短路測試（Idle 數值落入 Running 範��）',
+      'show_vdd_short_test_desc': '電源短路測試（Idle 數值落入 Running 範圍）',
       'show_vss_short_test': '顯示 VSS 短路測試',
       'show_vss_short_test_desc': '接地短路測試（Running 數值落入 Idle 範圍）',
       'adjacent_short_test_optimization': '相鄰短路測試優化',
@@ -535,6 +536,7 @@ class LocalizationService {
       'please_select_firmware': '請先選擇韌體檔案',
       'starting_program': '開始燒錄...',
       'waiting_stm32_startup': '等待 STM32 啟動中...',
+      'waiting_stm32_startup_countdown': '等待 STM32 啟動中... ({seconds} 秒)',
       'program_success': '韌體燒錄成功',
       'erase': '擦除',
       'reset': '重置',
@@ -778,6 +780,7 @@ class LocalizationService {
       'output_closed': 'closed',
 
       // Error messages
+      'arduino_port_error': 'Cannot open Arduino serial port',
       'enter_payload': 'Enter payload (without header and CS)',
       'hex_length_error': 'Hex string length must be even',
       'parse_error': 'Parse error: {error}',
@@ -1088,6 +1091,7 @@ class LocalizationService {
       'please_select_firmware': 'Please select a firmware file first',
       'starting_program': 'Starting programming...',
       'waiting_stm32_startup': 'Waiting for STM32 startup...',
+      'waiting_stm32_startup_countdown': 'Waiting for STM32 startup... ({seconds}s)',
       'program_success': 'Firmware programmed successfully',
       'erase': 'Erase',
       'reset': 'Reset',

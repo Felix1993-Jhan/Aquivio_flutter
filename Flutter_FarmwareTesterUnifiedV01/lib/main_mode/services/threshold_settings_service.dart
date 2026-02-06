@@ -7,34 +7,13 @@
 // - 提供恢復初始設定功能
 // ============================================================================
 
-import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:flutter_firmware_tester_unified/shared/models/threshold_range.dart';
+import 'package:flutter_firmware_tester_unified/shared/services/threshold_storage_mixin.dart';
 
-/// 單一 ID 的閾值範圍設定
-class ThresholdRange {
-  final int min;
-  final int max;
-
-  const ThresholdRange({required this.min, required this.max});
-
-  /// 檢查數值是否在範圍內
-  bool isInRange(int value) => value >= min && value <= max;
-
-  /// 從 JSON 建立
-  factory ThresholdRange.fromJson(Map<String, dynamic> json) {
-    return ThresholdRange(
-      min: json['min'] as int,
-      max: json['max'] as int,
-    );
-  }
-
-  /// 轉換為 JSON
-  Map<String, dynamic> toJson() => {'min': min, 'max': max};
-
-  @override
-  String toString() => '$min ~ $max';
-}
+// ThresholdRange 類別已移至 shared/models/threshold_range.dart
+export 'package:flutter_firmware_tester_unified/shared/models/threshold_range.dart';
 
 /// 設備類型
 enum DeviceType { arduino, stm32 }
@@ -43,23 +22,34 @@ enum DeviceType { arduino, stm32 }
 enum StateType { idle, running }
 
 /// 閾值設定服務（單例模式）
-class ThresholdSettingsService {
+class ThresholdSettingsService with ThresholdStorageMixin {
   static final ThresholdSettingsService _instance = ThresholdSettingsService._internal();
   factory ThresholdSettingsService() => _instance;
   ThresholdSettingsService._internal();
 
-  /// 設定變更通知器
-  final ValueNotifier<int> settingsUpdateNotifier = ValueNotifier(0);
+  // ==================== Mixin 實作 ====================
 
-  /// 是否已完成初始化
-  bool _isInitialized = false;
-  bool get isInitialized => _isInitialized;
+  /// 設定變更通知器
+  @override
+  final ValueNotifier<int> settingsUpdateNotifier = ValueNotifier(0);
 
   /// SharedPreferences 實例
   SharedPreferences? _prefs;
 
+  @override
+  SharedPreferences? get prefs => _prefs;
+
   /// 儲存鍵名前綴
   static const String _keyPrefix = 'threshold_';
+
+  @override
+  String get keyPrefix => _keyPrefix;
+
+  // ==================== 初始化狀態 ====================
+
+  /// 是否已完成初始化
+  bool _isInitialized = false;
+  bool get isInitialized => _isInitialized;
 
   // ==================== 預設值 ====================
   // 這些是初始預設值，可以被恢復
@@ -318,113 +308,54 @@ class ThresholdSettingsService {
 
   /// 載入設定
   Future<void> _loadSettings() async {
-    _arduinoIdleHardware = _loadThresholdMap('arduino_idle_hardware', _defaultArduinoIdleHardware);
-    _arduinoRunningHardware = _loadThresholdMap('arduino_running_hardware', _defaultArduinoRunningHardware);
-    _stm32IdleHardware = _loadThresholdMap('stm32_idle_hardware', _defaultStm32IdleHardware);
-    _stm32RunningHardware = _loadThresholdMap('stm32_running_hardware', _defaultStm32RunningHardware);
-    _arduinoSensor = _loadThresholdMap('arduino_sensor', _defaultArduinoSensor);
-    _stm32Sensor = _loadThresholdMap('stm32_sensor', _defaultStm32Sensor);
-    _diffThreshold = _loadIntMap('diff_threshold', _defaultDiffThreshold);
-    // 載入 VDD/VSS 短路測試顯示設定（預設關閉）
-    _showVddShortTest = _prefs?.getBool('${_keyPrefix}show_vdd_short_test') ?? false;
-    _showVssShortTest = _prefs?.getBool('${_keyPrefix}show_vss_short_test') ?? false;
-    // 載入相鄰短路測試優化設定（預設關閉）
-    _adjacentShortTestOptimization = _prefs?.getBool('${_keyPrefix}adjacent_short_test_optimization') ?? false;
-    // 載入相鄰短路顯示模式設定（預設 false，傳統模式）
-    _adjacentShortDisplayInRunning = _prefs?.getBool('${_keyPrefix}adjacent_short_display_in_running') ?? false;
-    // 載入診斷偵測設定（預設開啟）
-    _showLoadDetection = _prefs?.getBool('${_keyPrefix}show_load_detection') ?? true;
-    _showGsShortDetection = _prefs?.getBool('${_keyPrefix}show_gs_short_detection') ?? true;
-    _showGpioStatusDetection = _prefs?.getBool('${_keyPrefix}show_gpio_status_detection') ?? true;
-    _showWireErrorDetection = _prefs?.getBool('${_keyPrefix}show_wire_error_detection') ?? true;
-    // 載入診斷偵測閾值
-    _loadDetectionRunningThreshold = _prefs?.getInt('${_keyPrefix}diag_load_running') ?? defaultLoadDetectionRunningThreshold;
-    _loadDetectionIdleThreshold = _prefs?.getInt('${_keyPrefix}diag_load_idle') ?? defaultLoadDetectionIdleThreshold;
-    _gsShortRunningThreshold = _prefs?.getInt('${_keyPrefix}diag_gs_short_running') ?? defaultGsShortRunningThreshold;
-    _gpioStuckOnIdleThreshold = _prefs?.getInt('${_keyPrefix}diag_gpio_stuck_on') ?? defaultGpioStuckOnIdleThreshold;
-    _gpioStuckOffRunningThreshold = _prefs?.getInt('${_keyPrefix}diag_gpio_stuck_off') ?? defaultGpioStuckOffRunningThreshold;
-    _wireErrorDiffThreshold = _prefs?.getInt('${_keyPrefix}diag_wire_error_diff') ?? defaultWireErrorDiffThreshold;
-    _d12vShortArduinoThreshold = _prefs?.getInt('${_keyPrefix}diag_d12v_short') ?? defaultD12vShortArduinoThreshold;
-    _arduinoDiffThreshold = _prefs?.getInt('${_keyPrefix}diag_arduino_diff') ?? defaultArduinoDiffThreshold;
-    _loadDisconnectedStm32RunningMin = _prefs?.getInt('${_keyPrefix}diag_load_stm32_run_min') ?? defaultLoadDisconnectedStm32RunningMin;
-    _loadDisconnectedStm32RunningMax = _prefs?.getInt('${_keyPrefix}diag_load_stm32_run_max') ?? defaultLoadDisconnectedStm32RunningMax;
-    _gdShortArduinoRunningMin = _prefs?.getInt('${_keyPrefix}diag_gd_arduino_run_min') ?? defaultGdShortArduinoRunningMin;
-    _gdShortArduinoRunningMax = _prefs?.getInt('${_keyPrefix}diag_gd_arduino_run_max') ?? defaultGdShortArduinoRunningMax;
-    _gdShortStm32RunningMin = _prefs?.getInt('${_keyPrefix}diag_gd_stm32_run_min') ?? defaultGdShortStm32RunningMin;
-    _gdShortStm32RunningMax = _prefs?.getInt('${_keyPrefix}diag_gd_stm32_run_max') ?? defaultGdShortStm32RunningMax;
-    _dsShortArduinoIdleMin = _prefs?.getInt('${_keyPrefix}diag_ds_arduino_idle_min') ?? defaultDsShortArduinoIdleMin;
-    _dsShortArduinoIdleMax = _prefs?.getInt('${_keyPrefix}diag_ds_arduino_idle_max') ?? defaultDsShortArduinoIdleMax;
-    _dsShortStm32IdleMin = _prefs?.getInt('${_keyPrefix}diag_ds_stm32_idle_min') ?? defaultDsShortStm32IdleMin;
-    _dsShortStm32IdleMax = _prefs?.getInt('${_keyPrefix}diag_ds_stm32_idle_max') ?? defaultDsShortStm32IdleMax;
-    _tempSensorErrorValue = _prefs?.getInt('${_keyPrefix}diag_temp_error') ?? defaultTempSensorErrorValue;
-    _adjacentShortThreshold = _prefs?.getInt('${_keyPrefix}diag_adjacent_short') ?? defaultAdjacentShortThreshold;
-    _arduinoVssThreshold = _prefs?.getInt('${_keyPrefix}diag_arduino_vss') ?? defaultArduinoVssThreshold;
-    _arduinoIdleNormalMin = _prefs?.getInt('${_keyPrefix}diag_arduino_idle_normal_min') ?? defaultArduinoIdleNormalMin;
-    _maxRetryPerID = _prefs?.getInt('${_keyPrefix}polling_max_retry') ?? defaultMaxRetryPerID;
-    _hardwareWaitMs = _prefs?.getInt('${_keyPrefix}polling_hw_wait') ?? defaultHardwareWaitMs;
-    _sensorWaitMs = _prefs?.getInt('${_keyPrefix}polling_sensor_wait') ?? defaultSensorWaitMs;
+    // 使用 Mixin 方法載入 Map 類型設定
+    _arduinoIdleHardware = loadThresholdMap('arduino_idle_hardware', _defaultArduinoIdleHardware);
+    _arduinoRunningHardware = loadThresholdMap('arduino_running_hardware', _defaultArduinoRunningHardware);
+    _stm32IdleHardware = loadThresholdMap('stm32_idle_hardware', _defaultStm32IdleHardware);
+    _stm32RunningHardware = loadThresholdMap('stm32_running_hardware', _defaultStm32RunningHardware);
+    _arduinoSensor = loadThresholdMap('arduino_sensor', _defaultArduinoSensor);
+    _stm32Sensor = loadThresholdMap('stm32_sensor', _defaultStm32Sensor);
+    _diffThreshold = loadIntMap('diff_threshold', _defaultDiffThreshold);
+    // 使用 Mixin 方法載入 bool 類型設定
+    _showVddShortTest = loadBool('show_vdd_short_test', false);
+    _showVssShortTest = loadBool('show_vss_short_test', false);
+    _adjacentShortTestOptimization = loadBool('adjacent_short_test_optimization', false);
+    _adjacentShortDisplayInRunning = loadBool('adjacent_short_display_in_running', false);
+    _showLoadDetection = loadBool('show_load_detection', true);
+    _showGsShortDetection = loadBool('show_gs_short_detection', true);
+    _showGpioStatusDetection = loadBool('show_gpio_status_detection', true);
+    _showWireErrorDetection = loadBool('show_wire_error_detection', true);
+    // 使用 Mixin 方法載入 int 類型設定
+    _loadDetectionRunningThreshold = loadInt('diag_load_running', defaultLoadDetectionRunningThreshold);
+    _loadDetectionIdleThreshold = loadInt('diag_load_idle', defaultLoadDetectionIdleThreshold);
+    _gsShortRunningThreshold = loadInt('diag_gs_short_running', defaultGsShortRunningThreshold);
+    _gpioStuckOnIdleThreshold = loadInt('diag_gpio_stuck_on', defaultGpioStuckOnIdleThreshold);
+    _gpioStuckOffRunningThreshold = loadInt('diag_gpio_stuck_off', defaultGpioStuckOffRunningThreshold);
+    _wireErrorDiffThreshold = loadInt('diag_wire_error_diff', defaultWireErrorDiffThreshold);
+    _d12vShortArduinoThreshold = loadInt('diag_d12v_short', defaultD12vShortArduinoThreshold);
+    _arduinoDiffThreshold = loadInt('diag_arduino_diff', defaultArduinoDiffThreshold);
+    _loadDisconnectedStm32RunningMin = loadInt('diag_load_stm32_run_min', defaultLoadDisconnectedStm32RunningMin);
+    _loadDisconnectedStm32RunningMax = loadInt('diag_load_stm32_run_max', defaultLoadDisconnectedStm32RunningMax);
+    _gdShortArduinoRunningMin = loadInt('diag_gd_arduino_run_min', defaultGdShortArduinoRunningMin);
+    _gdShortArduinoRunningMax = loadInt('diag_gd_arduino_run_max', defaultGdShortArduinoRunningMax);
+    _gdShortStm32RunningMin = loadInt('diag_gd_stm32_run_min', defaultGdShortStm32RunningMin);
+    _gdShortStm32RunningMax = loadInt('diag_gd_stm32_run_max', defaultGdShortStm32RunningMax);
+    _dsShortArduinoIdleMin = loadInt('diag_ds_arduino_idle_min', defaultDsShortArduinoIdleMin);
+    _dsShortArduinoIdleMax = loadInt('diag_ds_arduino_idle_max', defaultDsShortArduinoIdleMax);
+    _dsShortStm32IdleMin = loadInt('diag_ds_stm32_idle_min', defaultDsShortStm32IdleMin);
+    _dsShortStm32IdleMax = loadInt('diag_ds_stm32_idle_max', defaultDsShortStm32IdleMax);
+    _tempSensorErrorValue = loadInt('diag_temp_error', defaultTempSensorErrorValue);
+    _adjacentShortThreshold = loadInt('diag_adjacent_short', defaultAdjacentShortThreshold);
+    _arduinoVssThreshold = loadInt('diag_arduino_vss', defaultArduinoVssThreshold);
+    _arduinoIdleNormalMin = loadInt('diag_arduino_idle_normal_min', defaultArduinoIdleNormalMin);
+    _maxRetryPerID = loadInt('polling_max_retry', defaultMaxRetryPerID);
+    _hardwareWaitMs = loadInt('polling_hw_wait', defaultHardwareWaitMs);
+    _sensorWaitMs = loadInt('polling_sensor_wait', defaultSensorWaitMs);
   }
 
-  /// 載入 ThresholdRange Map
-  Map<int, ThresholdRange> _loadThresholdMap(String key, Map<int, ThresholdRange> defaultValue) {
-    final jsonStr = _prefs?.getString('$_keyPrefix$key');
-    if (jsonStr == null) {
-      return Map.from(defaultValue);
-    }
-    try {
-      final Map<String, dynamic> jsonMap = json.decode(jsonStr);
-      final result = <int, ThresholdRange>{};
-      jsonMap.forEach((k, v) {
-        result[int.parse(k)] = ThresholdRange.fromJson(v);
-      });
-      return result;
-    } catch (e) {
-      return Map.from(defaultValue);
-    }
-  }
-
-  /// 載入 int Map
-  Map<int, int> _loadIntMap(String key, Map<int, int> defaultValue) {
-    final jsonStr = _prefs?.getString('$_keyPrefix$key');
-    if (jsonStr == null) {
-      return Map.from(defaultValue);
-    }
-    try {
-      final Map<String, dynamic> jsonMap = json.decode(jsonStr);
-      final result = <int, int>{};
-      jsonMap.forEach((k, v) {
-        result[int.parse(k)] = v as int;
-      });
-      return result;
-    } catch (e) {
-      return Map.from(defaultValue);
-    }
-  }
-
-  /// 儲存 ThresholdRange Map
-  Future<void> _saveThresholdMap(String key, Map<int, ThresholdRange> value) async {
-    final jsonMap = <String, dynamic>{};
-    value.forEach((k, v) {
-      jsonMap[k.toString()] = v.toJson();
-    });
-    await _prefs?.setString('$_keyPrefix$key', json.encode(jsonMap));
-    _notifyUpdate();
-  }
-
-  /// 儲存 int Map
-  Future<void> _saveIntMap(String key, Map<int, int> value) async {
-    final jsonMap = <String, dynamic>{};
-    value.forEach((k, v) {
-      jsonMap[k.toString()] = v;
-    });
-    await _prefs?.setString('$_keyPrefix$key', json.encode(jsonMap));
-    _notifyUpdate();
-  }
-
-  /// 通知更新
-  void _notifyUpdate() {
-    settingsUpdateNotifier.value++;
-  }
+  // 注意：_loadThresholdMap, _loadIntMap, _saveThresholdMap, _saveIntMap, notifyUpdate
+  // 已移至 ThresholdStorageMixin，改用 loadThresholdMap, loadIntMap, saveThresholdMap,
+  // saveIntMap, notifyUpdate 方法
 
   // ==================== 取得設定值 ====================
 
@@ -541,18 +472,18 @@ class ThresholdSettingsService {
     if (device == DeviceType.arduino) {
       if (state == StateType.idle) {
         _arduinoIdleHardware[id] = range;
-        await _saveThresholdMap('arduino_idle_hardware', _arduinoIdleHardware);
+        await saveThresholdMap('arduino_idle_hardware', _arduinoIdleHardware);
       } else {
         _arduinoRunningHardware[id] = range;
-        await _saveThresholdMap('arduino_running_hardware', _arduinoRunningHardware);
+        await saveThresholdMap('arduino_running_hardware', _arduinoRunningHardware);
       }
     } else {
       if (state == StateType.idle) {
         _stm32IdleHardware[id] = range;
-        await _saveThresholdMap('stm32_idle_hardware', _stm32IdleHardware);
+        await saveThresholdMap('stm32_idle_hardware', _stm32IdleHardware);
       } else {
         _stm32RunningHardware[id] = range;
-        await _saveThresholdMap('stm32_running_hardware', _stm32RunningHardware);
+        await saveThresholdMap('stm32_running_hardware', _stm32RunningHardware);
       }
     }
   }
@@ -567,18 +498,18 @@ class ThresholdSettingsService {
     if (device == DeviceType.arduino) {
       if (state == StateType.idle) {
         _arduinoIdleHardware = map;
-        await _saveThresholdMap('arduino_idle_hardware', _arduinoIdleHardware);
+        await saveThresholdMap('arduino_idle_hardware', _arduinoIdleHardware);
       } else {
         _arduinoRunningHardware = map;
-        await _saveThresholdMap('arduino_running_hardware', _arduinoRunningHardware);
+        await saveThresholdMap('arduino_running_hardware', _arduinoRunningHardware);
       }
     } else {
       if (state == StateType.idle) {
         _stm32IdleHardware = map;
-        await _saveThresholdMap('stm32_idle_hardware', _stm32IdleHardware);
+        await saveThresholdMap('stm32_idle_hardware', _stm32IdleHardware);
       } else {
         _stm32RunningHardware = map;
-        await _saveThresholdMap('stm32_running_hardware', _stm32RunningHardware);
+        await saveThresholdMap('stm32_running_hardware', _stm32RunningHardware);
       }
     }
   }
@@ -587,80 +518,80 @@ class ThresholdSettingsService {
   Future<void> setSensorThreshold(DeviceType device, int id, ThresholdRange range) async {
     if (device == DeviceType.arduino) {
       _arduinoSensor[id] = range;
-      await _saveThresholdMap('arduino_sensor', _arduinoSensor);
+      await saveThresholdMap('arduino_sensor', _arduinoSensor);
     } else {
       _stm32Sensor[id] = range;
-      await _saveThresholdMap('stm32_sensor', _stm32Sensor);
+      await saveThresholdMap('stm32_sensor', _stm32Sensor);
     }
   }
 
   /// 設定差值閾值
   Future<void> setDiffThreshold(int id, int threshold) async {
     _diffThreshold[id] = threshold;
-    await _saveIntMap('diff_threshold', _diffThreshold);
+    await saveIntMap('diff_threshold', _diffThreshold);
   }
 
   /// 設定是否顯示 VDD 短路測試結果
   Future<void> setShowVddShortTest(bool value) async {
     _showVddShortTest = value;
     await _prefs?.setBool('${_keyPrefix}show_vdd_short_test', value);
-    _notifyUpdate();
+    notifyUpdate();
   }
 
   /// 設定是否顯示 VSS 短路測試結果
   Future<void> setShowVssShortTest(bool value) async {
     _showVssShortTest = value;
     await _prefs?.setBool('${_keyPrefix}show_vss_short_test', value);
-    _notifyUpdate();
+    notifyUpdate();
   }
 
   /// 設定是否啟用相鄰短路測試優化
   Future<void> setAdjacentShortTestOptimization(bool value) async {
     _adjacentShortTestOptimization = value;
     await _prefs?.setBool('${_keyPrefix}adjacent_short_test_optimization', value);
-    _notifyUpdate();
+    notifyUpdate();
   }
 
   /// 設定相鄰短路顯示模式
   Future<void> setAdjacentShortDisplayInRunning(bool value) async {
     _adjacentShortDisplayInRunning = value;
     await _prefs?.setBool('${_keyPrefix}adjacent_short_display_in_running', value);
-    _notifyUpdate();
+    notifyUpdate();
   }
 
   /// 設定是否顯示負載偵測結果
   Future<void> setShowLoadDetection(bool value) async {
     _showLoadDetection = value;
     await _prefs?.setBool('${_keyPrefix}show_load_detection', value);
-    _notifyUpdate();
+    notifyUpdate();
   }
 
   /// 設定是否顯示 MOSFET 異常偵測結果（原 G-S 短路偵測）
   Future<void> setShowMosfetDetection(bool value) async {
     _showGsShortDetection = value;
     await _prefs?.setBool('${_keyPrefix}show_gs_short_detection', value);
-    _notifyUpdate();
+    notifyUpdate();
   }
 
   /// 設定是否顯示 GPIO 狀態偵測結果
   Future<void> setShowGpioStatusDetection(bool value) async {
     _showGpioStatusDetection = value;
     await _prefs?.setBool('${_keyPrefix}show_gpio_status_detection', value);
-    _notifyUpdate();
+    notifyUpdate();
   }
 
   /// 設定是否顯示線材錯誤偵測結果
   Future<void> setShowWireErrorDetection(bool value) async {
     _showWireErrorDetection = value;
     await _prefs?.setBool('${_keyPrefix}show_wire_error_detection', value);
-    _notifyUpdate();
+    notifyUpdate();
   }
 
   // ==================== 診斷偵測閾值 Setters ====================
 
   Future<void> _setDiagInt(String key, int value) async {
     await _prefs?.setInt('${_keyPrefix}diag_$key', value);
-    _notifyUpdate();
+    notifyUpdate();
   }
 
   Future<void> setLoadDetectionRunningThreshold(int v) async { _loadDetectionRunningThreshold = v; await _setDiagInt('load_running', v); }
@@ -685,9 +616,9 @@ class ThresholdSettingsService {
   Future<void> setAdjacentShortThreshold(int v) async { _adjacentShortThreshold = v; await _setDiagInt('adjacent_short', v); }
   Future<void> setArduinoVssThreshold(int v) async { _arduinoVssThreshold = v; await _setDiagInt('arduino_vss', v); }
   Future<void> setArduinoIdleNormalMin(int v) async { _arduinoIdleNormalMin = v; await _setDiagInt('arduino_idle_normal_min', v); }
-  Future<void> setMaxRetryPerID(int v) async { _maxRetryPerID = v; await _prefs?.setInt('${_keyPrefix}polling_max_retry', v); _notifyUpdate(); }
-  Future<void> setHardwareWaitMs(int v) async { _hardwareWaitMs = v; await _prefs?.setInt('${_keyPrefix}polling_hw_wait', v); _notifyUpdate(); }
-  Future<void> setSensorWaitMs(int v) async { _sensorWaitMs = v; await _prefs?.setInt('${_keyPrefix}polling_sensor_wait', v); _notifyUpdate(); }
+  Future<void> setMaxRetryPerID(int v) async { _maxRetryPerID = v; await _prefs?.setInt('${_keyPrefix}polling_max_retry', v); notifyUpdate(); }
+  Future<void> setHardwareWaitMs(int v) async { _hardwareWaitMs = v; await _prefs?.setInt('${_keyPrefix}polling_hw_wait', v); notifyUpdate(); }
+  Future<void> setSensorWaitMs(int v) async { _sensorWaitMs = v; await _prefs?.setInt('${_keyPrefix}polling_sensor_wait', v); notifyUpdate(); }
 
   // ==================== 恢復預設值 ====================
 
@@ -721,7 +652,7 @@ class ThresholdSettingsService {
       await _prefs?.remove(key);
     }
 
-    _notifyUpdate();
+    notifyUpdate();
   }
 
   /// 重置所有診斷閾值為預設值（內部方法，不通知）
@@ -761,7 +692,7 @@ class ThresholdSettingsService {
     for (final key in keys) {
       await _prefs?.remove(key);
     }
-    _notifyUpdate();
+    notifyUpdate();
   }
 
   /// 恢復感測器閾值為預設值
@@ -774,7 +705,7 @@ class ThresholdSettingsService {
     await _prefs?.remove('${_keyPrefix}stm32_sensor');
     await _prefs?.remove('${_keyPrefix}diff_threshold');
     await _prefs?.remove('${_keyPrefix}diag_temp_error');
-    _notifyUpdate();
+    notifyUpdate();
   }
 
   /// 恢復硬體閾值為預設值（所有四組）
@@ -787,7 +718,7 @@ class ThresholdSettingsService {
     await _prefs?.remove('${_keyPrefix}arduino_running_hardware');
     await _prefs?.remove('${_keyPrefix}stm32_idle_hardware');
     await _prefs?.remove('${_keyPrefix}stm32_running_hardware');
-    _notifyUpdate();
+    notifyUpdate();
   }
 
   /// 恢復特定類型的設定為預設值
@@ -809,7 +740,7 @@ class ThresholdSettingsService {
         await _prefs?.remove('${_keyPrefix}stm32_running_hardware');
       }
     }
-    _notifyUpdate();
+    notifyUpdate();
   }
 
   // ==================== 驗證方法 ====================

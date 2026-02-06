@@ -30,7 +30,7 @@ class _SettingsPageState extends State<SettingsPage> {
       builder: (context, currentLanguage, _) {
         return ValueListenableBuilder<int>(
           valueListenable: _thresholdService.settingsUpdateNotifier,
-          builder: (context, _, __) {
+          builder: (context, _, _) {
             return SingleChildScrollView(
               padding: const EdgeInsets.all(16),
               child: Column(

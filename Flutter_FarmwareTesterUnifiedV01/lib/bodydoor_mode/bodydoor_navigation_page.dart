@@ -7,18 +7,19 @@
 
 import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:flutter_libserialport/flutter_libserialport.dart';
 
 import 'package:flutter_firmware_tester_unified/shared/services/data_storage_service.dart';
+import 'package:flutter_firmware_tester_unified/shared/services/port_filter_service.dart';
 import 'package:flutter_firmware_tester_unified/main_mode/main_navigation_page.dart' show MainNavigationPage;
 import 'package:flutter_firmware_tester_unified/mode_selection_page.dart';
-import 'services/serial_port_manager.dart';
+import 'package:flutter_firmware_tester_unified/shared/services/serial_port_manager.dart';
 import 'package:flutter_firmware_tester_unified/shared/services/localization_service.dart';
 import 'services/threshold_settings_service.dart';
 import 'package:flutter_firmware_tester_unified/shared/widgets/arduino_panel.dart' hide EmeraldColors;
 import 'widgets/data_storage_page.dart';
 import 'widgets/auto_detection_page.dart';
 import 'widgets/settings_page.dart';
+import 'package:flutter_firmware_tester_unified/shared/controllers/debug_history_mixin.dart';
 import 'controllers/auto_detection_controller.dart';
 import 'controllers/serial_controller.dart';
 
@@ -37,7 +38,7 @@ class BodyDoorNavigationPage extends StatefulWidget {
 }
 
 class _BodyDoorNavigationPageState extends State<BodyDoorNavigationPage>
-    with AutoDetectionController, SerialController {
+    with DebugHistoryMixin, AutoDetectionController, SerialController {
   // ==================== 串口管理器 ====================
 
   final SerialPortManager _arduinoManager =
@@ -237,6 +238,7 @@ class _BodyDoorNavigationPageState extends State<BodyDoorNavigationPage>
   @override
   void showErrorDialogMessage(String message) => _showErrorDialog(message);
 
+  @override
   void onWrongModeDetected(String portName) => _showWrongModeDialog(portName);
 
   // ==================== 生命週期 ====================
@@ -335,13 +337,19 @@ class _BodyDoorNavigationPageState extends State<BodyDoorNavigationPage>
   }
 
   /// 檢查 COM 埠變化
-  void _checkPortChanges() {
+  /// 使用 PortFilterService 排除 ST-Link VCP 埠口
+  /// 使用非同步方法避免阻塞 UI
+  Future<void> _checkPortChanges() async {
     List<String> currentPorts;
     try {
-      currentPorts = SerialPort.availablePorts;
+      // 使用非同步方法在背景執行緒取得埠口列表，避免 UI 卡頓
+      currentPorts = await PortFilterService.getAvailablePortsAsync(excludeStLink: true);
     } catch (e) {
       return;
     }
+
+    // 檢查 widget 是否仍然掛載
+    if (!mounted) return;
 
     // 找出被移除的 COM 埠
     final removedPorts = _lastDetectedPorts
@@ -409,9 +417,10 @@ class _BodyDoorNavigationPageState extends State<BodyDoorNavigationPage>
   // ==================== 串口操作 ====================
 
   /// 刷新可用 COM 埠列表
+  /// 使用 PortFilterService 排除 ST-Link VCP 埠口
   void _refreshPorts() {
     setState(() {
-      _availablePorts = SerialPort.availablePorts;
+      _availablePorts = PortFilterService.getAvailablePorts(excludeStLink: true);
     });
 
     if (_availablePorts.isEmpty) {
@@ -573,7 +582,7 @@ class _BodyDoorNavigationPageState extends State<BodyDoorNavigationPage>
   Widget build(BuildContext context) {
     return ValueListenableBuilder<AppLanguage>(
       valueListenable: LocalizationService().currentLanguageNotifier,
-      builder: (context, _, __) {
+      builder: (context, _, _) {
         return Scaffold(
           appBar: AppBar(
             title: Row(

@@ -20,10 +20,10 @@ class _DetectionRulesPageState extends State<DetectionRulesPage> {
   Widget build(BuildContext context) {
     return ValueListenableBuilder<AppLanguage>(
       valueListenable: LocalizationService().currentLanguageNotifier,
-      builder: (context, _, __) {
+      builder: (context, _, _) {
         return ValueListenableBuilder<int>(
           valueListenable: _service.settingsUpdateNotifier,
-          builder: (context, _, __) {
+          builder: (context, _, _) {
             return Scaffold(
               appBar: AppBar(
                 title: Text(tr('detection_rules_title')),

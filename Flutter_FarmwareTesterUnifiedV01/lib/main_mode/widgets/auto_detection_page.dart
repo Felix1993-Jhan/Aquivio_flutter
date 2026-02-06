@@ -478,13 +478,13 @@ class _AutoDetectionPageState extends State<AutoDetectionPage> {
     // 監聽語言變更，自動更新 UI
     return ValueListenableBuilder<AppLanguage>(
       valueListenable: LocalizationService().currentLanguageNotifier,
-      builder: (context, _, __) {
+      builder: (context, _, _) {
         return ValueListenableBuilder<int>(
           valueListenable: widget.dataStorage.dataUpdateNotifier,
-          builder: (context, _, __) {
+          builder: (context, _, _) {
             return ValueListenableBuilder<int>(
               valueListenable: widget.dataStorage.runningStateNotifier,
-              builder: (context, _, __) {
+              builder: (context, _, _) {
                 return Stack(
                   children: [
                     // 主要內容
@@ -1316,116 +1316,6 @@ class _AutoDetectionPageState extends State<AutoDetectionPage> {
     );
   }
 
-  /// 建構玻璃質感橢圓形按鈕 (Glassy Oval Button)
-  Widget _buildMetallicButton({
-    required bool isCompact,
-    required bool isAutoDetecting,
-    required VoidCallback onPressed,
-  }) {
-    // 玻璃質感配色
-    const glassLight = Color(0xFFF5F5F5);
-    const glassMid = Color(0xFFE8E8E8);
-    const glassDark = Color(0xFFD0D0D0);
-    const borderColor = Color(0xFFBDBDBD);
-    const textColor = Color(0xFF424242);
-    const disabledText = Color(0xFF9E9E9E);
-
-    if (isCompact) {
-      // 緊湊模式：圓形玻璃按鈕
-      return Center(
-        child: Container(
-          width: 40,
-          height: 40,
-          decoration: BoxDecoration(
-            gradient: const LinearGradient(
-              begin: Alignment.topCenter,
-              end: Alignment.bottomCenter,
-              colors: [glassLight, glassMid, glassDark],
-              stops: [0.0, 0.5, 1.0],
-            ),
-            shape: BoxShape.circle,
-            border: Border.all(color: borderColor, width: 1),
-            boxShadow: const [
-              BoxShadow(
-                color: Colors.black26,
-                blurRadius: 4,
-                offset: Offset(0, 2),
-              ),
-            ],
-          ),
-          child: Material(
-            color: Colors.transparent,
-            child: InkWell(
-              onTap: isAutoDetecting ? null : onPressed,
-              borderRadius: BorderRadius.circular(20),
-              child: Center(
-                child: Icon(
-                  isAutoDetecting ? Icons.hourglass_empty : Icons.play_arrow,
-                  color: isAutoDetecting ? disabledText : textColor,
-                  size: 22,
-                ),
-              ),
-            ),
-          ),
-        ),
-      );
-    }
-
-    // 完整模式：橢圓形玻璃按鈕
-    return Center(
-      child: Container(
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(30),
-          gradient: const LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [glassLight, glassMid, glassDark],
-            stops: [0.0, 0.6, 1.0],
-          ),
-          border: Border.all(color: borderColor, width: 1),
-          boxShadow: const [
-            BoxShadow(
-              color: Colors.black26,
-              blurRadius: 6,
-              offset: Offset(0, 3),
-            ),
-          ],
-        ),
-        child: Material(
-          color: Colors.transparent,
-          child: InkWell(
-            onTap: isAutoDetecting ? null : onPressed,
-            borderRadius: BorderRadius.circular(30),
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(
-                    isAutoDetecting ? Icons.hourglass_empty : Icons.play_arrow,
-                    color: isAutoDetecting ? disabledText : textColor,
-                    size: 20,
-                  ),
-                  const SizedBox(width: 8),
-                  Text(
-                    isAutoDetecting
-                        ? tr('auto_detection_running')
-                        : tr('auto_detection_start'),
-                    style: TextStyle(
-                      color: isAutoDetecting ? disabledText : textColor,
-                      fontSize: 14,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
   /// 建構燒入並檢測按鈕（玻璃質感，琥珀色調）
   Widget _buildProgramAndDetectButton({required bool isCompact}) {
     final canStart = widget.isStLinkConnected &&
@@ -1936,7 +1826,7 @@ class _AutoDetectionPageState extends State<AutoDetectionPage> {
             style: TextStyle(
               fontSize: 12,
               color: Colors.purple.shade800,
-              fontWeight: FontWeight.w500,
+              fontWeight: FontWeight.w600,
             ),
             textAlign: TextAlign.center,
           ),
