@@ -251,11 +251,100 @@ Future<void> connectUr() async {
 
 ## 開發注意事項
 
-- **平台**：僅支援 Windows 桌面（依賴 flutter_libserialport 與 window_manager）
+- **平台**：支援 Windows 和 Linux 桌面（依賴 flutter_libserialport 與 window_manager）
 - **SDK 版本**：Flutter SDK ^3.10.4
-- **建構指令**：`flutter build windows`
+- **建構指令**：
+  - Windows: `flutter build windows --release`
+  - Linux: `flutter build linux --release`（需在 Linux 環境執行）
 - **靜態分析**：`flutter analyze`（已忽略 `unnecessary_null_comparison` 與 `unintended_html_in_doc_comment`）
 - **串口安全**：所有串口操作均有 try-catch 保護，USB 拔除時自動觸發斷線處理
 - **導航方式**：模式切換使用 `Navigator.pushReplacement` 避免畫面堆疊
 - **語言同步**：透過全域 `globalLanguageNotifier`（`ValueNotifier<String>`）跨模式同步語言設定
 - **ST-Link 排除**：所有連線掃描功能自動排除 ST-Link VCP 埠口，避免衝突
+
+---
+
+## 跨平台支援
+
+### 平台對應的預設路徑
+
+**STM32CubeProgrammer CLI 路徑** (自動偵測)：
+- Windows: `C:\Program Files\STMicroelectronics\STM32Cube\STM32CubeProgrammer\bin\STM32_Programmer_CLI.exe`
+- Linux: `/usr/local/STMicroelectronics/STM32Cube/STM32CubeProgrammer/bin/STM32_Programmer_CLI`
+- macOS: `/Applications/STMicroelectronics/STM32Cube/STM32CubeProgrammer/STM32CubeProgrammer.app/Contents/MacOs/bin/STM32_Programmer_CLI`
+
+### Linux 特殊需求
+
+**串口權限：**
+```bash
+sudo usermod -a -G dialout $USER
+# 登出並重新登入
+```
+
+**ST-Link 權限（udev 規則）：**
+```bash
+sudo nano /etc/udev/rules.d/49-stlinkv2.rules
+# 參考 LINUX_DEPLOYMENT.md
+```
+
+詳細部署說明：[LINUX_DEPLOYMENT.md](LINUX_DEPLOYMENT.md)
+
+---
+
+## GitHub Actions 自動建構
+
+專案位於 Monorepo 結構中，使用 GitHub Actions 自動建構：
+
+### 儲存庫結構
+```
+Aquivio_flutter/                              ← Monorepo 根目錄
+├── .github/
+│   └── workflows/
+│       └── Flutter_FarmwareTesterUnifiedV01.yml  ← 此專案的工作流程
+├── Flutter_FarmwareTesterUnifiedV01/         ← 本專案（會自動建構）
+├── Flutter_FarmwareTestBodyDoorV01/          ← 歷史版本（無自動建構）
+└── Flutter_FarmwareTesterV01/                ← 歷史版本（無自動建構）
+```
+
+### 觸發條件
+
+工作流程會在以下情況觸發：
+1. Push 到 `main` 或 `master` 分支，且修改了以下路徑：
+   - `Flutter_FarmwareTesterUnifiedV01/**`
+   - `.github/workflows/Flutter_FarmwareTesterUnifiedV01.yml`
+2. 手動觸發（workflow_dispatch）
+
+### 建構產物
+
+- **Windows**: `FarmwareTesterUnified-Windows.zip`
+- **Linux**: `FarmwareTesterUnified-Linux.zip`
+- **保留期限**: 30 天
+
+### 費用消耗
+
+每次建構消耗約 5-10 分鐘的 GitHub Actions 額度：
+- Windows runner: 2x 倍率（約 2 分鐘 = 4 分鐘額度）
+- Linux runner: 1x 倍率（約 1 分鐘 = 1 分鐘額度）
+
+免費帳號每月 2000 分鐘，足以支援約 200-400 次建構。
+
+---
+
+## 專案定位
+
+本專案為 **Farmware Tester Suite** 的主力版本：
+
+- ✅ **Flutter_FarmwareTesterUnifiedV01** — 整合版（**推薦使用**）
+  - 支援 Main Board + Body&Door Board 雙模式
+  - 自動偵測並切換模式
+  - 完整功能（Arduino + STM32 + ST-Link 燒錄）
+
+- 📦 **Flutter_FarmwareTestBodyDoorV01** — Body&Door Board 獨立版（歷史版本）
+  - 已整合至 Unified 版本
+  - 保留作為參考
+
+- 📦 **Flutter_FarmwareTesterV01** — Main Board 獨立版（歷史版本）
+  - 已整合至 Unified 版本
+  - 保留作為參考
+
+**建議使用者直接下載 Unified 版本，享受完整功能與持續更新支援。**
