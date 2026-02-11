@@ -7,6 +7,20 @@
 import 'dart:async';
 import 'dart:io';
 
+/// 取得平台對應的預設 CLI 路徑
+String _getDefaultCliPath() {
+  if (Platform.isWindows) {
+    return r'C:\Program Files\STMicroelectronics\STM32Cube\STM32CubeProgrammer\bin\STM32_Programmer_CLI.exe';
+  } else if (Platform.isLinux) {
+    // Linux 預設安裝路徑
+    return '/usr/local/STMicroelectronics/STM32Cube/STM32CubeProgrammer/bin/STM32_Programmer_CLI';
+  } else if (Platform.isMacOS) {
+    // macOS 預設安裝路徑
+    return '/Applications/STMicroelectronics/STM32Cube/STM32CubeProgrammer/STM32CubeProgrammer.app/Contents/MacOs/bin/STM32_Programmer_CLI';
+  }
+  throw UnsupportedError('不支援的平台: ${Platform.operatingSystem}');
+}
+
 /// 燒錄狀態
 enum ProgrammerStatus {
   idle,           // 閒置
@@ -55,11 +69,10 @@ class StLinkInfo {
 
 /// ST-Link Programmer 服務
 class StLinkProgrammerService {
-  // STM32CubeProgrammer CLI 預設路徑
-  static const String _defaultCliPath =
-      r'C:\Program Files\STMicroelectronics\STM32Cube\STM32CubeProgrammer\bin\STM32_Programmer_CLI.exe';
+  // STM32CubeProgrammer CLI 預設路徑（根據平台決定）
+  static final String defaultCliPath = _getDefaultCliPath();
 
-  String _cliPath = _defaultCliPath;
+  String _cliPath = defaultCliPath;
 
   // ST-Link 頻率選項 (kHz)
   static const List<int> frequencyOptions = [5, 50, 200, 1000, 3300, 8000, 24000];

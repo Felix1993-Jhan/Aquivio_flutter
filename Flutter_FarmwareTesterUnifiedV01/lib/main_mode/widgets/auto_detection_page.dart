@@ -1871,8 +1871,8 @@ class _AutoDetectionPageState extends State<AutoDetectionPage> {
     required HardwareState state,
     required Color color,
   }) {
-    // 判斷是否為 Running 區域且使用新模式
-    final isRunningWithNewMode = state == HardwareState.running && widget.adjacentDisplayInRunning;
+    // 判斷是否為 Running 區域且使用新模式（由本地按鈕控制）
+    final isRunningWithNewMode = state == HardwareState.running && _showAdjacentDetails;
 
     return Container(
       color: Colors.grey.shade50,
