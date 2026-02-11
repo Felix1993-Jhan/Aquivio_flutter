@@ -24,8 +24,10 @@ jobs:
     - name: Setup Flutter
       uses: subosito/flutter-action@v2
       with:
-        flutter-version: '3.10.4'
         channel: 'stable'
+
+    - name: Enable Windows desktop
+      run: flutter config --enable-windows-desktop
 
     - name: Install dependencies
       working-directory: Flutter_FarmwareTesterUnifiedV01
@@ -58,8 +60,10 @@ jobs:
     - name: Setup Flutter
       uses: subosito/flutter-action@v2
       with:
-        flutter-version: '3.10.4'
         channel: 'stable'
+
+    - name: Enable Linux desktop
+      run: flutter config --enable-linux-desktop
 
     - name: Install dependencies
       working-directory: Flutter_FarmwareTesterUnifiedV01
