@@ -153,8 +153,8 @@ class ThresholdSettingsService with ThresholdStorageMixin {
   /// STM32 感測器預設範圍 (ID 18-23)
   static const Map<int, ThresholdRange> _defaultStm32Sensor = {
     18: ThresholdRange(min: 0, max: 10000),    // Flow
-    19: ThresholdRange(min: 930, max: 980),    // PressureCO2 (1V 對應 930~965)
-    20: ThresholdRange(min: 930, max: 980),    // PressureWater (1V 對應 930~965)
+    19: ThresholdRange(min: 850, max: 1100),   // PressureCO2
+    20: ThresholdRange(min: 850, max: 1100),   // PressureWater
     21: ThresholdRange(min: -20, max: 100),    // MCUtemp (溫度範圍 -20~100)
     22: ThresholdRange(min: -20, max: 100),    // WATERtemp (溫度範圍 -20~100)
     23: ThresholdRange(min: -20, max: 100),    // BIBtemp (溫度範圍 -20~100)
