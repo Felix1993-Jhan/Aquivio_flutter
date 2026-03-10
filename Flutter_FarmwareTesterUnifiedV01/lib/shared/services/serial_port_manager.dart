@@ -50,6 +50,12 @@ class SerialPortManager with ArduinoConnectionMixin {
   /// - false: UR 用，接收的是原始 16 進制資料
   final bool isTextMode;
 
+  /// 期望的 Arduino 模式（用於心跳判斷）
+  /// - ArduinoMode.main: 期望收到 "connectedmain"（Main 模式）
+  /// - ArduinoMode.bodyDoor: 期望收到 "connectedbodydoor"（BodyDoor 模式）
+  /// - ArduinoMode.unknown: 不區分模式（Probe 探測用）
+  final ArduinoMode expectedMode;
+
   /// 數據接收回調（用於儲存數據）
   /// 參數: (int id, int value)
   void Function(int id, int value)? onDataReceived;
@@ -109,7 +115,7 @@ class SerialPortManager with ArduinoConnectionMixin {
   /// 建構函式
   /// @param name 串口識別名稱，用於日誌顯示
   /// @param isTextMode 是否為文字模式，預設為 true
-  SerialPortManager(this.name, {this.isTextMode = true});
+  SerialPortManager(this.name, {this.isTextMode = true, this.expectedMode = ArduinoMode.main});
 
   // -------------------- Getter --------------------
 
@@ -541,17 +547,24 @@ class SerialPortManager with ArduinoConnectionMixin {
             final lineLower = line.toLowerCase();
 
             // 檢查是否為心跳回應（使用 contains 以容忍額外字元）
+            // 根據 expectedMode 判斷哪個回應為「正確模式」或「錯誤模式」
             if (lineLower.contains('connectedmain')) {
               detectedMode = ArduinoMode.main;
-              _handleHeartbeatResponse();
-              // 心跳回應不記錄日誌
+              if (expectedMode == ArduinoMode.main || expectedMode == ArduinoMode.unknown) {
+                _handleHeartbeatResponse();
+              } else {
+                wrongModeDetectedNotifier.value = true;
+              }
               continue;
             }
 
-            // 檢查是否為其他模式的心跳回應（BodyDoor 的 Arduino）
             if (lineLower.contains('connectedbodydoor')) {
               detectedMode = ArduinoMode.bodyDoor;
-              wrongModeDetectedNotifier.value = true;
+              if (expectedMode == ArduinoMode.bodyDoor || expectedMode == ArduinoMode.unknown) {
+                _handleHeartbeatResponse();
+              } else {
+                wrongModeDetectedNotifier.value = true;
+              }
               continue;
             }
 
@@ -596,8 +609,8 @@ class SerialPortManager with ArduinoConnectionMixin {
   // Arduino 回應解析
   // ============================================================================
 
-  /// Arduino 回應名稱與 ID 對照表
-  /// 根據 Arduino 實際回傳的格式來對應
+  /// Arduino 回應名稱與 ID 對照表（Main Board 用）
+  /// 根據 Main Board Arduino 實際回傳的格式來對應
   static const Map<String, int> _arduinoResponseToId = {
     // SLOT0~SLOT9 對應 ID 0-9
     'slot0': 0, 'slot1': 1, 'slot2': 2, 'slot3': 3, 'slot4': 4,
@@ -618,6 +631,38 @@ class SerialPortManager with ArduinoConnectionMixin {
     'mcu': 21, 'mcutemp': 21,
   };
 
+  /// Arduino 回應名稱與 ID 對照表（BodyDoor Board 用）
+  /// 根據 BodyDoor Arduino 韌體實際回傳的格式來對應（ID 0-18，共 19 通道）
+  static const Map<String, int> _arduinoResponseToIdBodyDoor = {
+    'ambientrl': 0,       // A0
+    'coolrl': 1,          // A1
+    'sparklingrl': 2,     // A2
+    'waterpump': 3,       // A3
+    'o3': 4,              // A4
+    'mainuvc': 5,         // A5
+    'bibtemp': 6,         // A6
+    'flowmeter': 7,       // A7
+    'watertemp': 8,       // A8
+    'leak': 9,            // A9
+    'waterpressure': 10,  // A10
+    'co2pressure': 11,    // A11
+    'spoutuvc': 12,       // A12
+    'mixuvc': 13,         // A13
+    'flowmeter2': 14,     // A14
+    'bodypower_24v': 15,        // A15,CH5（Arduino 回傳 BodyPower_24V）
+    'bodypower_12v': 16,        // A15,CH7（Arduino 回傳 BodyPower_12V）
+    'bodypower_upscreen': 17,   // A15,CH6（Arduino 回傳 BodyPower_UpScreen）
+    'bodypower_lowscreen': 18,  // A15,CH4（Arduino 回傳 BodyPower_LowScreen）
+  };
+
+  /// 根據 expectedMode 取得對應的回應名稱→ID 映射表
+  Map<String, int> get _activeResponseToId {
+    if (expectedMode == ArduinoMode.bodyDoor) {
+      return _arduinoResponseToIdBodyDoor;
+    }
+    return _arduinoResponseToId;
+  }
+
   /// 解析 Arduino 回應
   /// 支援 Arduino 實際回傳的格式:
   /// - "SLOT0 (AD09): 1234"
@@ -634,7 +679,7 @@ class SerialPortManager with ArduinoConnectionMixin {
       final valueStr = adcMatch.group(2)!;
       final value = int.tryParse(valueStr);
       if (value != null) {
-        final id = _arduinoResponseToId[name];
+        final id = _activeResponseToId[name];
         if (id != null) {
           onDataReceived?.call(id, value);
           return;

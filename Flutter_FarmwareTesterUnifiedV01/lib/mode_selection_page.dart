@@ -47,14 +47,27 @@ class _ModeSelectionPageState extends State<ModeSelectionPage> {
   /// 用於探測的 SerialPortManager
   SerialPortManager? _probeManager;
 
+  /// COM 埠監控定時器（每 1 秒檢查一次 COM 埠變化）
+  Timer? _portMonitorTimer;
+
+  /// 上次偵測到的 COM 埠列表（用於比較變化）
+  List<String> _lastDetectedPorts = [];
+
   // ==================== 生命週期 ====================
 
   @override
   void initState() {
     super.initState();
-    // 延遲一幀再開始偵測，確保 UI 已建構完成
+    // 延遲一段時間再開始偵測
+    // 1. 確保 UI 已建構完成
+    // 2. 等待前一個頁面的串口完全釋放（Windows COM 埠驅動程式需要時間）
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _startAutoDetect();
+      Future.delayed(const Duration(milliseconds: 500), () {
+        if (mounted && !_navigated) {
+          _startPortMonitor();
+          _startAutoDetect();
+        }
+      });
     });
   }
 
@@ -70,7 +83,54 @@ class _ModeSelectionPageState extends State<ModeSelectionPage> {
   void _stopAutoDetect() {
     _retryTimer?.cancel();
     _retryTimer = null;
+    _portMonitorTimer?.cancel();
+    _portMonitorTimer = null;
     _closeProbeManager();
+  }
+
+  /// 啟動 COM 埠監控（每 1 秒檢查一次埠口變化）
+  void _startPortMonitor() {
+    try {
+      _lastDetectedPorts = PortFilterService.getAvailablePorts(excludeStLink: true);
+    } catch (e) {
+      _lastDetectedPorts = [];
+    }
+
+    _portMonitorTimer?.cancel();
+    _portMonitorTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      _checkPortChanges();
+    });
+  }
+
+  /// 檢查 COM 埠變化，偵測到新埠口時立即觸發重新偵測
+  Future<void> _checkPortChanges() async {
+    if (_navigated || !mounted) return;
+
+    List<String> currentPorts;
+    try {
+      currentPorts = await PortFilterService.getAvailablePortsAsync(excludeStLink: true);
+    } catch (e) {
+      return;
+    }
+
+    if (_navigated || !mounted) return;
+
+    // 找出新增的 COM 埠
+    final addedPorts = currentPorts
+        .where((port) => !_lastDetectedPorts.contains(port))
+        .toList();
+
+    _lastDetectedPorts = List.from(currentPorts);
+
+    // 如果有新增的 COM 埠且目前不在掃描中，立即觸發重新偵測
+    if (addedPorts.isNotEmpty && !_isScanning) {
+      _retryTimer?.cancel();
+      // 等待新裝置穩定（剛插入的 USB 需要驅動程式初始化）
+      await Future.delayed(const Duration(milliseconds: 800));
+      if (mounted && !_navigated && !_isScanning) {
+        _startAutoDetect();
+      }
+    }
   }
 
   /// 關閉探測用的 SerialPortManager
@@ -169,7 +229,7 @@ class _ModeSelectionPageState extends State<ModeSelectionPage> {
 
     try {
       // 建立臨時的 SerialPortManager 用於探測
-      _probeManager = SerialPortManager('Probe');
+      _probeManager = SerialPortManager('Probe', expectedMode: ArduinoMode.unknown);
 
       // 使用統一的連線驗證方法
       final result = await _probeManager!.connectAndVerify(portName);

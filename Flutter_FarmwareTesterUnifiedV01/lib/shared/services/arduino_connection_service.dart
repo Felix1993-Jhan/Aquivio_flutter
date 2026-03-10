@@ -126,9 +126,10 @@ mixin ArduinoConnectionMixin {
       return ConnectResult.portError;
     }
 
-    // 2. 等待 Arduino 初始化（bootloader 輸出完成）
-    //    Arduino 開機時會輸出 bootloader 訊息，需要等待完成
-    await Future.delayed(const Duration(milliseconds: 1000));
+    // 2. 等待 Arduino 初始化（bootloader + setup() 完成）
+    //    Arduino 開機時會執行 bootloader（~500ms-1000ms）和 setup()（視韌體而定）
+    //    需要足夠時間讓韌體完全啟動才能回應 connect 指令
+    await Future.delayed(const Duration(milliseconds: 2000));
 
     // 3. 清空開機時累積的緩衝區資料（軟體緩衝區 + 硬體緩衝區）
     connectionReceiveBuffer.clear();
@@ -139,8 +140,8 @@ mixin ArduinoConnectionMixin {
       }
     } catch (_) {}
 
-    // 4. 發送 connect 指令（最多嘗試 2 次）
-    for (int attempt = 0; attempt < 2; attempt++) {
+    // 4. 發送 connect 指令（最多嘗試 3 次）
+    for (int attempt = 0; attempt < 3; attempt++) {
       // 每次嘗試前都清空緩衝區
       connectionReceiveBuffer.clear();
       sendStringCommand('connect');

@@ -12,6 +12,7 @@ import 'package:flutter_firmware_tester_unified/shared/services/data_storage_ser
 import 'package:flutter_firmware_tester_unified/shared/services/port_filter_service.dart';
 import 'package:flutter_firmware_tester_unified/main_mode/main_navigation_page.dart' show MainNavigationPage;
 import 'package:flutter_firmware_tester_unified/mode_selection_page.dart';
+import 'package:flutter_firmware_tester_unified/shared/services/arduino_connection_service.dart';
 import 'package:flutter_firmware_tester_unified/shared/services/serial_port_manager.dart';
 import 'package:flutter_firmware_tester_unified/shared/services/localization_service.dart';
 import 'services/threshold_settings_service.dart';
@@ -42,7 +43,7 @@ class _BodyDoorNavigationPageState extends State<BodyDoorNavigationPage>
   // ==================== 串口管理器 ====================
 
   final SerialPortManager _arduinoManager =
-      SerialPortManager('Arduino', isTextMode: true);
+      SerialPortManager('Arduino', isTextMode: true, expectedMode: ArduinoMode.bodyDoor);
 
   // ==================== 數據儲存服務 ====================
 
@@ -302,6 +303,9 @@ class _BodyDoorNavigationPageState extends State<BodyDoorNavigationPage>
       // 重置 notifier
       _arduinoManager.wrongModeDetectedNotifier.value = false;
 
+      // 確認 widget 仍然掛載
+      if (!mounted) return;
+
       // 如果對話框已經在顯示，不重複彈出
       if (_isWrongModeDialogShowing) return;
 
@@ -443,6 +447,8 @@ class _BodyDoorNavigationPageState extends State<BodyDoorNavigationPage>
 
   /// 顯示錯誤提示對話框
   void _showErrorDialog(String message) {
+    // 防止在 widget 已卸載後使用 context
+    if (!mounted) return;
     // 防止重複彈出錯誤對話框
     if (_isErrorDialogShowing) return;
     _isErrorDialogShowing = true;
@@ -516,13 +522,15 @@ class _BodyDoorNavigationPageState extends State<BodyDoorNavigationPage>
         );
       },
     ).then((_) {
-      // 對話框關閉時重置標記
-      _isErrorDialogShowing = false;
+      // 對話框關閉時重置標記（確認 widget 仍掛載）
+      if (mounted) _isErrorDialogShowing = false;
     });
   }
 
   /// 顯示偵測到錯誤模式裝置的對話框
   void _showWrongModeDialog(String detectedPort) {
+    // 防止在 widget 已卸載後使用 context
+    if (!mounted) return;
     _isWrongModeDialogShowing = true;
 
     showDialog(
@@ -550,6 +558,9 @@ class _BodyDoorNavigationPageState extends State<BodyDoorNavigationPage>
           ElevatedButton.icon(
             onPressed: () {
               _isWrongModeDialogShowing = false;  // 先設為 false，避免 .then() 執行斷開連線
+              // 導航前先移除 listener 並關閉串口，防止導航過程中再次觸發 wrongMode
+              _arduinoManager.wrongModeDetectedNotifier.removeListener(_onWrongModeDetected);
+              _arduinoManager.close();
               Navigator.of(dialogContext).pop();
               // 直接切換到 Main 模式，並傳入偵測到的串口
               Navigator.of(context).pushReplacement(
@@ -568,7 +579,8 @@ class _BodyDoorNavigationPageState extends State<BodyDoorNavigationPage>
         ],
       ),
     ).then((_) {
-      // 點擊外部或取消按鈕關閉時執行斷開連線
+      // 點擊外部或取消按鈕關閉時執行斷開連線（確認 widget 仍掛載）
+      if (!mounted) return;
       if (_isWrongModeDialogShowing) {
         _isWrongModeDialogShowing = false;
         disconnectArduino();

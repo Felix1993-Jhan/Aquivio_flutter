@@ -40,8 +40,8 @@ class ThresholdSettingsService with ThresholdStorageMixin {
   @override
   SharedPreferences? get prefs => _prefs;
 
-  /// 儲存鍵名前綴
-  static const String _keyPrefix = 'threshold_';
+  /// 儲存鍵名前綴（使用 'threshold_bd_' 避免與 Main 模式的 'threshold_' 衝突）
+  static const String _keyPrefix = 'threshold_bd_';
 
   @override
   String get keyPrefix => _keyPrefix;

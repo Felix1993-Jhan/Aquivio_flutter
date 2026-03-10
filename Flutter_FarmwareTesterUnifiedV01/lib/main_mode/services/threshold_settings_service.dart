@@ -7,6 +7,7 @@
 // - 提供恢復初始設定功能
 // ============================================================================
 
+import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter_firmware_tester_unified/shared/models/threshold_range.dart';
@@ -302,8 +303,37 @@ class ThresholdSettingsService with ThresholdStorageMixin {
   Future<void> init() async {
     if (_isInitialized) return;
     _prefs = await SharedPreferences.getInstance();
+
+    // 一次性清理：移除可能被 BodyDoor 舊版本污染的閾值資料
+    await _migrateCleanupContaminatedData();
+
     await _loadSettings();
     _isInitialized = true;
+  }
+
+  /// 一次性遷移：清理被 BodyDoor 舊版本（使用相同 threshold_ 前綴）污染的資料
+  /// BodyDoor 有 19 個 ID (0-18)，Main 只有 18 個 ID (0-17)
+  /// 若 arduino_idle_hardware 資料含有 ID "18"，即可確認為 BodyDoor 資料，應清除
+  Future<void> _migrateCleanupContaminatedData() async {
+    final migrated = _prefs?.getBool('${_keyPrefix}migration_bd_cleanup') ?? false;
+    if (migrated) return;
+
+    final key = '${_keyPrefix}arduino_idle_hardware';
+    final existingData = _prefs?.getString(key);
+    if (existingData != null) {
+      try {
+        final Map<String, dynamic> jsonMap = json.decode(existingData);
+        if (jsonMap.containsKey('18')) {
+          // 含有 ID 18 → 確認為 BodyDoor 遺留資料，清除
+          await _prefs?.remove(key);
+        }
+      } catch (_) {
+        // JSON 解析失敗也清除（資料已損壞）
+        await _prefs?.remove(key);
+      }
+    }
+
+    await _prefs?.setBool('${_keyPrefix}migration_bd_cleanup', true);
   }
 
   /// 載入設定

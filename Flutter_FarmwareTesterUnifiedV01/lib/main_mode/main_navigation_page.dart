@@ -635,6 +635,9 @@ class _MainNavigationPageState extends State<MainNavigationPage>
       // 重置 notifier
       _arduinoManager.wrongModeDetectedNotifier.value = false;
 
+      // 確認 widget 仍然掛載
+      if (!mounted) return;
+
       // 如果對話框已經在顯示，不重複彈出
       if (_isWrongModeDialogShowing) return;
 
@@ -848,6 +851,8 @@ class _MainNavigationPageState extends State<MainNavigationPage>
 
   /// 顯示錯誤提示對話框（畫面中央，2秒後自動關閉，或點擊關閉，帶淡入縮放動畫）
   void _showErrorDialog(String message) {
+    // 防止在 widget 已卸載後使用 context
+    if (!mounted) return;
     // 防止重複彈出錯誤對話框
     if (_isErrorDialogShowing) return;
     _isErrorDialogShowing = true;
@@ -919,13 +924,15 @@ class _MainNavigationPageState extends State<MainNavigationPage>
         );
       },
     ).then((_) {
-      // 對話框關閉時重置標記
-      _isErrorDialogShowing = false;
+      // 對話框關閉時重置標記（確認 widget 仍掛載）
+      if (mounted) _isErrorDialogShowing = false;
     });
   }
 
   /// 顯示偵測到錯誤模式裝置的對話框
   void _showWrongModeDialog(String detectedPort) {
+    // 防止在 widget 已卸載後使用 context
+    if (!mounted) return;
     _isWrongModeDialogShowing = true;
 
     showDialog(
@@ -953,6 +960,9 @@ class _MainNavigationPageState extends State<MainNavigationPage>
           ElevatedButton.icon(
             onPressed: () {
               _isWrongModeDialogShowing = false;  // 先設為 false，避免 .then() 執行斷開連線
+              // 導航前先移除 listener 並關閉串口，防止導航過程中再次觸發 wrongMode
+              _arduinoManager.wrongModeDetectedNotifier.removeListener(_onWrongModeDetected);
+              _arduinoManager.close();
               Navigator.of(dialogContext).pop();
               // 直接切換到 BodyDoor 模式，並傳入偵測到的串口
               Navigator.of(context).pushReplacement(
@@ -971,7 +981,8 @@ class _MainNavigationPageState extends State<MainNavigationPage>
         ],
       ),
     ).then((_) {
-      // 點擊外部或取消按鈕關閉時執行斷開連線
+      // 點擊外部或取消按鈕關閉時執行斷開連線（確認 widget 仍掛載）
+      if (!mounted) return;
       if (_isWrongModeDialogShowing) {
         _isWrongModeDialogShowing = false;
         disconnectArduino();
