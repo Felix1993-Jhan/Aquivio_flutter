@@ -163,6 +163,9 @@ class _MainNavigationPageState extends State<MainNavigationPage>
   /// STM32 連接重試計數
   int _urConnectRetryCount = 0;
 
+  /// 是否正在自動連接 STM32（防止重複觸發）
+  bool _isAutoConnectingStm32 = false;
+
   /// 錯誤模式對話框是否正在顯示（防止重複彈出）
   bool _isWrongModeDialogShowing = false;
 
@@ -741,9 +744,10 @@ class _MainNavigationPageState extends State<MainNavigationPage>
           }
         });
 
-        // 顯示變化訊息
+        // 顯示變化訊息，並自動連接未連線的裝置
         if (addedPorts.isNotEmpty) {
           _showSnackBar(tr('new_com_port_detected').replaceAll('{ports}', addedPorts.join(", ")));
+          _autoConnectOnNewPorts();
         }
       }
     }
@@ -797,6 +801,27 @@ class _MainNavigationPageState extends State<MainNavigationPage>
       });
       _showErrorDialog(tr('stm32_connection_error'));
     }
+  }
+
+  /// 偵測到新 COM 埠時，自動嘗試連接未連線的裝置
+  void _autoConnectOnNewPorts() {
+    // 延遲 500ms 讓 USB 裝置穩定初始化
+    Future.delayed(const Duration(milliseconds: 500), () {
+      if (!mounted) return;
+
+      // 若 STM32 UART 尚未連接，嘗試自動連接
+      if (!_urManager.isConnected && !_isAutoConnectingStm32) {
+        _isAutoConnectingStm32 = true;
+        connectUr().whenComplete(() {
+          _isAutoConnectingStm32 = false;
+        });
+      }
+
+      // 若 ST-Link 燒錄器尚未連接，重新檢查連接狀態
+      if (!_isStLinkConnected) {
+        _checkStLinkConnection();
+      }
+    });
   }
 
   // ==================== 頁面切換 ====================
