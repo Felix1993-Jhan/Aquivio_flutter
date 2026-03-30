@@ -123,24 +123,24 @@ class ThresholdSettingsService with ThresholdStorageMixin {
 
   /// STM32 Running 預設範圍 (硬體 ID 0-17)
   static const Map<int, ThresholdRange> _defaultStm32RunningHardware = {
-    0: ThresholdRange(min: 300, max: 380),
-    1: ThresholdRange(min: 300, max: 380),
-    2: ThresholdRange(min: 300, max: 380),
-    3: ThresholdRange(min: 300, max: 380),
-    4: ThresholdRange(min: 300, max: 380),
-    5: ThresholdRange(min: 300, max: 380),
-    6: ThresholdRange(min: 300, max: 380),
-    7: ThresholdRange(min: 300, max: 380),
-    8: ThresholdRange(min: 300, max: 380),
-    9: ThresholdRange(min: 300, max: 380),
-    10: ThresholdRange(min: 300, max: 380),
-    11: ThresholdRange(min: 300, max: 380),
-    12: ThresholdRange(min: 300, max: 380),
-    13: ThresholdRange(min: 300, max: 380),
-    14: ThresholdRange(min: 300, max: 380),
-    15: ThresholdRange(min: 300, max: 380),
-    16: ThresholdRange(min: 300, max: 380),
-    17: ThresholdRange(min: 300, max: 380),
+    0: ThresholdRange(min: 280, max: 360),
+    1: ThresholdRange(min: 280, max: 360),
+    2: ThresholdRange(min: 280, max: 360),
+    3: ThresholdRange(min: 280, max: 360),
+    4: ThresholdRange(min: 280, max: 360),
+    5: ThresholdRange(min: 280, max: 360),
+    6: ThresholdRange(min: 280, max: 360),
+    7: ThresholdRange(min: 280, max: 360),
+    8: ThresholdRange(min: 280, max: 360),
+    9: ThresholdRange(min: 280, max: 360),
+    10: ThresholdRange(min: 280, max: 360),
+    11: ThresholdRange(min: 280, max: 360),
+    12: ThresholdRange(min: 280, max: 360),
+    13: ThresholdRange(min: 280, max: 360),
+    14: ThresholdRange(min: 280, max: 360),
+    15: ThresholdRange(min: 280, max: 360),
+    16: ThresholdRange(min: 280, max: 360),
+    17: ThresholdRange(min: 280, max: 360),
   };
 
   /// Arduino 感測器預設範圍 (ID 18-21)
@@ -154,8 +154,8 @@ class ThresholdSettingsService with ThresholdStorageMixin {
   /// STM32 感測器預設範圍 (ID 18-23)
   static const Map<int, ThresholdRange> _defaultStm32Sensor = {
     18: ThresholdRange(min: 0, max: 10000),    // Flow
-    19: ThresholdRange(min: 850, max: 1100),   // PressureCO2
-    20: ThresholdRange(min: 850, max: 1100),   // PressureWater
+    19: ThresholdRange(min: 900, max: 1050),   // PressureCO2
+    20: ThresholdRange(min: 900, max: 1050),   // PressureWater
     21: ThresholdRange(min: -20, max: 100),    // MCUtemp (溫度範圍 -20~100)
     22: ThresholdRange(min: -20, max: 100),    // WATERtemp (溫度範圍 -20~100)
     23: ThresholdRange(min: -20, max: 100),    // BIBtemp (溫度範圍 -20~100)
