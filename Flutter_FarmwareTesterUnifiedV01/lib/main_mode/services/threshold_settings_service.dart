@@ -121,26 +121,30 @@ class ThresholdSettingsService with ThresholdStorageMixin {
     17: ThresholdRange(min: 0, max: 55),
   };
 
+  /// ID2 STM32 Running ADC 偏移量（硬體特性，多片板測試確認 ID2 讀值偏高約 45）
+  static const int stm32RunningId2Offset = 45;
+
   /// STM32 Running 預設範圍 (硬體 ID 0-17)
+  /// 12V 經 10:4.7 分壓再 1:1 分壓，STM32 ADC 已做對地校正及 3.0V→2.5V 基準轉換
   static const Map<int, ThresholdRange> _defaultStm32RunningHardware = {
-    0: ThresholdRange(min: 280, max: 360),
-    1: ThresholdRange(min: 280, max: 360),
-    2: ThresholdRange(min: 280, max: 360),
-    3: ThresholdRange(min: 280, max: 360),
-    4: ThresholdRange(min: 280, max: 360),
-    5: ThresholdRange(min: 280, max: 360),
-    6: ThresholdRange(min: 280, max: 360),
-    7: ThresholdRange(min: 280, max: 360),
-    8: ThresholdRange(min: 280, max: 360),
-    9: ThresholdRange(min: 280, max: 360),
-    10: ThresholdRange(min: 280, max: 360),
-    11: ThresholdRange(min: 280, max: 360),
-    12: ThresholdRange(min: 280, max: 360),
-    13: ThresholdRange(min: 280, max: 360),
-    14: ThresholdRange(min: 280, max: 360),
-    15: ThresholdRange(min: 280, max: 360),
-    16: ThresholdRange(min: 280, max: 360),
-    17: ThresholdRange(min: 280, max: 360),
+    0: ThresholdRange(min: 265, max: 290),
+    1: ThresholdRange(min: 265, max: 290),
+    2: ThresholdRange(min: 310, max: 335), // ID2 偏移 +45
+    3: ThresholdRange(min: 265, max: 290),
+    4: ThresholdRange(min: 265, max: 290),
+    5: ThresholdRange(min: 265, max: 290),
+    6: ThresholdRange(min: 265, max: 290),
+    7: ThresholdRange(min: 265, max: 290),
+    8: ThresholdRange(min: 265, max: 290),
+    9: ThresholdRange(min: 265, max: 290),
+    10: ThresholdRange(min: 265, max: 290),
+    11: ThresholdRange(min: 265, max: 290),
+    12: ThresholdRange(min: 265, max: 290),
+    13: ThresholdRange(min: 265, max: 290),
+    14: ThresholdRange(min: 265, max: 290),
+    15: ThresholdRange(min: 265, max: 290),
+    16: ThresholdRange(min: 265, max: 290),
+    17: ThresholdRange(min: 265, max: 290),
   };
 
   /// Arduino 感測器預設範圍 (ID 18-21)
@@ -154,8 +158,8 @@ class ThresholdSettingsService with ThresholdStorageMixin {
   /// STM32 感測器預設範圍 (ID 18-23)
   static const Map<int, ThresholdRange> _defaultStm32Sensor = {
     18: ThresholdRange(min: 0, max: 10000),    // Flow
-    19: ThresholdRange(min: 900, max: 1050),   // PressureCO2
-    20: ThresholdRange(min: 900, max: 1050),   // PressureWater
+    19: ThresholdRange(min: 855, max: 875),    // PressureCO2
+    20: ThresholdRange(min: 855, max: 875),    // PressureWater
     21: ThresholdRange(min: -20, max: 100),    // MCUtemp (溫度範圍 -20~100)
     22: ThresholdRange(min: -20, max: 100),    // WATERtemp (溫度範圍 -20~100)
     23: ThresholdRange(min: -20, max: 100),    // BIBtemp (溫度範圍 -20~100)
@@ -222,6 +226,8 @@ class ThresholdSettingsService with ThresholdStorageMixin {
   static const int defaultLoadDetectionRunningThreshold = 100;
   static const int defaultLoadDetectionIdleThreshold = 50;
   static const int defaultGsShortRunningThreshold = 400;
+  static const int defaultGsShortArduinoRunningMin = 700;
+  static const int defaultGsShortArduinoRunningMax = 850;
   static const int defaultGpioStuckOnIdleThreshold = 150;
   static const int defaultGpioStuckOffRunningThreshold = 100;
   static const int defaultWireErrorDiffThreshold = 100;
@@ -235,8 +241,9 @@ class ThresholdSettingsService with ThresholdStorageMixin {
   static const int defaultGdShortStm32RunningMax = 570;
   static const int defaultDsShortArduinoIdleMin = 25;
   static const int defaultDsShortArduinoIdleMax = 60;
-  static const int defaultDsShortStm32IdleMin = 330;
-  static const int defaultDsShortStm32IdleMax = 375;
+  static const int defaultDsShortStm32IdleMin = 0;
+  static const int defaultDsShortStm32IdleMax = 10;
+  static const int defaultDsShortStm32RunningMax = 10;
   static const int defaultTempSensorErrorValue = 85;
   static const int defaultAdjacentShortThreshold = 100;
   static const int defaultArduinoVssThreshold = 10;
@@ -252,6 +259,10 @@ class ThresholdSettingsService with ThresholdStorageMixin {
   int _loadDetectionIdleThreshold = defaultLoadDetectionIdleThreshold;
   /// G-S 短路偵測：STM32 Running 高於此值視為 G-S 短路
   int _gsShortRunningThreshold = defaultGsShortRunningThreshold;
+  /// G-S 短路偵測：Arduino Running 範圍 Min（維持在 Idle 水平）
+  int _gsShortArduinoRunningMin = defaultGsShortArduinoRunningMin;
+  /// G-S 短路偵測：Arduino Running 範圍 Max
+  int _gsShortArduinoRunningMax = defaultGsShortArduinoRunningMax;
   /// GPIO 卡在 ON：STM32 Idle 高於此值視為 GPIO 卡在 ON
   int _gpioStuckOnIdleThreshold = defaultGpioStuckOnIdleThreshold;
   /// GPIO 卡在 OFF：STM32 Running 低於此值視為 GPIO 卡在 OFF（需配合有負載判斷）
@@ -282,6 +293,8 @@ class ThresholdSettingsService with ThresholdStorageMixin {
   int _dsShortStm32IdleMin = defaultDsShortStm32IdleMin;
   /// D-S 短路：STM32 Idle 範圍 Max
   int _dsShortStm32IdleMax = defaultDsShortStm32IdleMax;
+  /// D-S 短路：STM32 Running 上限（Running 低於此值視為 D-S 短路）
+  int _dsShortStm32RunningMax = defaultDsShortStm32RunningMax;
   /// 溫度感測器異常值（DS18B20 預設錯誤值）
   int _tempSensorErrorValue = defaultTempSensorErrorValue;
   /// 相鄰腳位短路閾值
@@ -359,6 +372,8 @@ class ThresholdSettingsService with ThresholdStorageMixin {
     _loadDetectionRunningThreshold = loadInt('diag_load_running', defaultLoadDetectionRunningThreshold);
     _loadDetectionIdleThreshold = loadInt('diag_load_idle', defaultLoadDetectionIdleThreshold);
     _gsShortRunningThreshold = loadInt('diag_gs_short_running', defaultGsShortRunningThreshold);
+    _gsShortArduinoRunningMin = loadInt('diag_gs_arduino_run_min', defaultGsShortArduinoRunningMin);
+    _gsShortArduinoRunningMax = loadInt('diag_gs_arduino_run_max', defaultGsShortArduinoRunningMax);
     _gpioStuckOnIdleThreshold = loadInt('diag_gpio_stuck_on', defaultGpioStuckOnIdleThreshold);
     _gpioStuckOffRunningThreshold = loadInt('diag_gpio_stuck_off', defaultGpioStuckOffRunningThreshold);
     _wireErrorDiffThreshold = loadInt('diag_wire_error_diff', defaultWireErrorDiffThreshold);
@@ -374,6 +389,7 @@ class ThresholdSettingsService with ThresholdStorageMixin {
     _dsShortArduinoIdleMax = loadInt('diag_ds_arduino_idle_max', defaultDsShortArduinoIdleMax);
     _dsShortStm32IdleMin = loadInt('diag_ds_stm32_idle_min', defaultDsShortStm32IdleMin);
     _dsShortStm32IdleMax = loadInt('diag_ds_stm32_idle_max', defaultDsShortStm32IdleMax);
+    _dsShortStm32RunningMax = loadInt('diag_ds_stm32_running_max', defaultDsShortStm32RunningMax);
     _tempSensorErrorValue = loadInt('diag_temp_error', defaultTempSensorErrorValue);
     _adjacentShortThreshold = loadInt('diag_adjacent_short', defaultAdjacentShortThreshold);
     _arduinoVssThreshold = loadInt('diag_arduino_vss', defaultArduinoVssThreshold);
@@ -472,6 +488,8 @@ class ThresholdSettingsService with ThresholdStorageMixin {
   int get loadDetectionRunningThreshold => _loadDetectionRunningThreshold;
   int get loadDetectionIdleThreshold => _loadDetectionIdleThreshold;
   int get gsShortRunningThreshold => _gsShortRunningThreshold;
+  int get gsShortArduinoRunningMin => _gsShortArduinoRunningMin;
+  int get gsShortArduinoRunningMax => _gsShortArduinoRunningMax;
   int get gpioStuckOnIdleThreshold => _gpioStuckOnIdleThreshold;
   int get gpioStuckOffRunningThreshold => _gpioStuckOffRunningThreshold;
   int get wireErrorDiffThreshold => _wireErrorDiffThreshold;
@@ -487,6 +505,7 @@ class ThresholdSettingsService with ThresholdStorageMixin {
   int get dsShortArduinoIdleMax => _dsShortArduinoIdleMax;
   int get dsShortStm32IdleMin => _dsShortStm32IdleMin;
   int get dsShortStm32IdleMax => _dsShortStm32IdleMax;
+  int get dsShortStm32RunningMax => _dsShortStm32RunningMax;
   int get tempSensorErrorValue => _tempSensorErrorValue;
   int get adjacentShortThreshold => _adjacentShortThreshold;
   int get arduinoVssThreshold => _arduinoVssThreshold;
@@ -519,10 +538,19 @@ class ThresholdSettingsService with ThresholdStorageMixin {
   }
 
   /// 批次設定硬體閾值（同一設備/狀態的所有 ID 使用相同範圍）
+  /// STM32 Running 時 ID2 自動加上偏移量（硬體特性補償）
   Future<void> setAllHardwareThresholds(DeviceType device, StateType state, ThresholdRange range) async {
     final map = <int, ThresholdRange>{};
+    final bool applyId2Offset = device == DeviceType.stm32 && state == StateType.running;
     for (int id = 0; id < 18; id++) {
-      map[id] = range;
+      if (applyId2Offset && id == 2) {
+        map[id] = ThresholdRange(
+          min: range.min + stm32RunningId2Offset,
+          max: range.max + stm32RunningId2Offset,
+        );
+      } else {
+        map[id] = range;
+      }
     }
 
     if (device == DeviceType.arduino) {
@@ -627,6 +655,8 @@ class ThresholdSettingsService with ThresholdStorageMixin {
   Future<void> setLoadDetectionRunningThreshold(int v) async { _loadDetectionRunningThreshold = v; await _setDiagInt('load_running', v); }
   Future<void> setLoadDetectionIdleThreshold(int v) async { _loadDetectionIdleThreshold = v; await _setDiagInt('load_idle', v); }
   Future<void> setGsShortRunningThreshold(int v) async { _gsShortRunningThreshold = v; await _setDiagInt('gs_short_running', v); }
+  Future<void> setGsShortArduinoRunningMin(int v) async { _gsShortArduinoRunningMin = v; await _setDiagInt('gs_arduino_run_min', v); }
+  Future<void> setGsShortArduinoRunningMax(int v) async { _gsShortArduinoRunningMax = v; await _setDiagInt('gs_arduino_run_max', v); }
   Future<void> setGpioStuckOnIdleThreshold(int v) async { _gpioStuckOnIdleThreshold = v; await _setDiagInt('gpio_stuck_on', v); }
   Future<void> setGpioStuckOffRunningThreshold(int v) async { _gpioStuckOffRunningThreshold = v; await _setDiagInt('gpio_stuck_off', v); }
   Future<void> setWireErrorDiffThreshold(int v) async { _wireErrorDiffThreshold = v; await _setDiagInt('wire_error_diff', v); }
@@ -642,6 +672,7 @@ class ThresholdSettingsService with ThresholdStorageMixin {
   Future<void> setDsShortArduinoIdleMax(int v) async { _dsShortArduinoIdleMax = v; await _setDiagInt('ds_arduino_idle_max', v); }
   Future<void> setDsShortStm32IdleMin(int v) async { _dsShortStm32IdleMin = v; await _setDiagInt('ds_stm32_idle_min', v); }
   Future<void> setDsShortStm32IdleMax(int v) async { _dsShortStm32IdleMax = v; await _setDiagInt('ds_stm32_idle_max', v); }
+  Future<void> setDsShortStm32RunningMax(int v) async { _dsShortStm32RunningMax = v; await _setDiagInt('ds_stm32_running_max', v); }
   Future<void> setTempSensorErrorValue(int v) async { _tempSensorErrorValue = v; await _setDiagInt('temp_error', v); }
   Future<void> setAdjacentShortThreshold(int v) async { _adjacentShortThreshold = v; await _setDiagInt('adjacent_short', v); }
   Future<void> setArduinoVssThreshold(int v) async { _arduinoVssThreshold = v; await _setDiagInt('arduino_vss', v); }
@@ -673,7 +704,7 @@ class ThresholdSettingsService with ThresholdStorageMixin {
     _showGsShortDetection = true;
     _showGpioStatusDetection = true;
     _showWireErrorDetection = true;
-    // 診斷偵測閾值恢復為預設值
+    // ��斷偵測閾值恢復為預設值
     _resetDiagnosticValues();
 
     // 清除所有儲存的設定
@@ -690,6 +721,8 @@ class ThresholdSettingsService with ThresholdStorageMixin {
     _loadDetectionRunningThreshold = defaultLoadDetectionRunningThreshold;
     _loadDetectionIdleThreshold = defaultLoadDetectionIdleThreshold;
     _gsShortRunningThreshold = defaultGsShortRunningThreshold;
+    _gsShortArduinoRunningMin = defaultGsShortArduinoRunningMin;
+    _gsShortArduinoRunningMax = defaultGsShortArduinoRunningMax;
     _gpioStuckOnIdleThreshold = defaultGpioStuckOnIdleThreshold;
     _gpioStuckOffRunningThreshold = defaultGpioStuckOffRunningThreshold;
     _wireErrorDiffThreshold = defaultWireErrorDiffThreshold;
@@ -705,6 +738,7 @@ class ThresholdSettingsService with ThresholdStorageMixin {
     _dsShortArduinoIdleMax = defaultDsShortArduinoIdleMax;
     _dsShortStm32IdleMin = defaultDsShortStm32IdleMin;
     _dsShortStm32IdleMax = defaultDsShortStm32IdleMax;
+    _dsShortStm32RunningMax = defaultDsShortStm32RunningMax;
     _tempSensorErrorValue = defaultTempSensorErrorValue;
     _adjacentShortThreshold = defaultAdjacentShortThreshold;
     _arduinoVssThreshold = defaultArduinoVssThreshold;

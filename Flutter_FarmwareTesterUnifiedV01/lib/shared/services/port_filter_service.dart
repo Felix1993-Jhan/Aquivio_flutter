@@ -22,7 +22,8 @@ class PortFilterService {
   /// [excludeStLink] 是否排除 ST-Link VCP 埠口，預設為 true
   /// 注意：此方法會阻塞 UI，建議在需要即時結果時使用
   static List<String> getAvailablePorts({bool excludeStLink = true}) {
-    final allPorts = SerialPort.availablePorts;
+    // 使用 toSet() 去除重複埠口名稱，避免 DropdownButton 斷言錯誤
+    final allPorts = SerialPort.availablePorts.toSet().toList();
 
     if (!excludeStLink) {
       return allPorts;
@@ -58,7 +59,8 @@ class PortFilterService {
   /// 此方法在背景執行緒執行，適合用於定時監控
   static Future<List<String>> getAvailablePortsAsync({bool excludeStLink = true}) async {
     return Isolate.run(() {
-      final allPorts = SerialPort.availablePorts;
+      // 使用 toSet() 去除重複埠口名稱
+      final allPorts = SerialPort.availablePorts.toSet().toList();
 
       if (!excludeStLink) {
         return allPorts;

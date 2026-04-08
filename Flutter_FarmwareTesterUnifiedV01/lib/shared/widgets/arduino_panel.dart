@@ -184,7 +184,7 @@ class ArduinoPanel extends StatelessWidget {
                   hint: Text(tr('select_com_port')),
                   isExpanded: true,
                   isDense: true,
-                  items: availablePorts.map((port) {
+                  items: availablePorts.toSet().map((port) {
                     return DropdownMenuItem(value: port, child: Text(port));
                   }).toList(),
                   onChanged: onPortChanged,

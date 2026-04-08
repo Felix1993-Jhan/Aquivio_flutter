@@ -591,6 +591,11 @@ class _SettingsPageState extends State<SettingsPage> {
   /// 顯示閾值編輯對話框
   void _showThresholdEditDialog(DeviceType device, StateType state, String title, Color color) {
     final thresholds = _thresholdService.getAllHardwareThresholds(device, state);
+    // STM32 Running 時，ID2 有硬體偏移補償
+    final Map<int, int>? idOffsets =
+        (device == DeviceType.stm32 && state == StateType.running)
+            ? {2: ThresholdSettingsService.stm32RunningId2Offset}
+            : null;
 
     showDialog(
       context: context,
@@ -598,6 +603,7 @@ class _SettingsPageState extends State<SettingsPage> {
         title: title,
         color: color,
         thresholds: thresholds,
+        idOffsets: idOffsets,
         onSave: (newThresholds) async {
           for (final entry in newThresholds.entries) {
             await _thresholdService.setHardwareThreshold(device, state, entry.key, entry.value);
@@ -811,6 +817,8 @@ class _ThresholdEditDialog extends StatefulWidget {
   final Map<int, ThresholdRange> thresholds;
   final Function(Map<int, ThresholdRange>) onSave;
   final Function(ThresholdRange) onApplyToAll;
+  /// 特定 ID 的偏移量（例如 {2: 35} 表示 ID2 套用所有時自動 +35）
+  final Map<int, int>? idOffsets;
 
   const _ThresholdEditDialog({
     required this.title,
@@ -818,6 +826,7 @@ class _ThresholdEditDialog extends StatefulWidget {
     required this.thresholds,
     required this.onSave,
     required this.onApplyToAll,
+    this.idOffsets,
   });
 
   @override
@@ -922,10 +931,13 @@ class _ThresholdEditDialogState extends State<_ThresholdEditDialog> {
                       final min = int.tryParse(_minController.text);
                       final max = int.tryParse(_maxController.text);
                       if (min != null && max != null && min <= max) {
-                        final range = ThresholdRange(min: min, max: max);
                         setState(() {
                           for (int i = 0; i < 18; i++) {
-                            _editedThresholds[i] = range;
+                            final offset = widget.idOffsets?[i] ?? 0;
+                            _editedThresholds[i] = ThresholdRange(
+                              min: min + offset,
+                              max: max + offset,
+                            );
                           }
                         });
                       }

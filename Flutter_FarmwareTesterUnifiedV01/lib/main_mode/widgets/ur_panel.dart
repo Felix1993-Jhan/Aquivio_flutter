@@ -248,7 +248,7 @@ class _UrPanelState extends State<UrPanel> {
                   hint: Text(tr('select_com_port')),
                   isExpanded: true,
                   isDense: true,
-                  items: widget.availablePorts.map((port) {
+                  items: widget.availablePorts.toSet().map((port) {
                     return DropdownMenuItem(value: port, child: Text(port));
                   }).toList(),
                   onChanged: widget.onPortChanged,

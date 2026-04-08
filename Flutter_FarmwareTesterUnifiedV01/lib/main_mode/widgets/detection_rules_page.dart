@@ -303,12 +303,16 @@ class _DetectionRulesPageState extends State<DetectionRulesPage> {
             _FieldConfig(label: 'STM32 Idle Max', value: _service.dsShortStm32IdleMax,
               defaultValue: ThresholdSettingsService.defaultDsShortStm32IdleMax,
               onSave: (v) => _service.setDsShortStm32IdleMax(v)),
+            _FieldConfig(label: 'STM32 Running Max', value: _service.dsShortStm32RunningMax,
+              defaultValue: ThresholdSettingsService.defaultDsShortStm32RunningMax,
+              onSave: (v) => _service.setDsShortStm32RunningMax(v)),
           ],
           onReset: () async {
             await _service.setDsShortArduinoIdleMin(ThresholdSettingsService.defaultDsShortArduinoIdleMin);
             await _service.setDsShortArduinoIdleMax(ThresholdSettingsService.defaultDsShortArduinoIdleMax);
             await _service.setDsShortStm32IdleMin(ThresholdSettingsService.defaultDsShortStm32IdleMin);
             await _service.setDsShortStm32IdleMax(ThresholdSettingsService.defaultDsShortStm32IdleMax);
+            await _service.setDsShortStm32RunningMax(ThresholdSettingsService.defaultDsShortStm32RunningMax);
             _showResetSnack();
           },
         ),
@@ -353,16 +357,25 @@ class _DetectionRulesPageState extends State<DetectionRulesPage> {
           },
         ),
         // G-S 短路
-        _buildEditableSingleCard(
+        _buildEditableMultiCard(
           title: tr('rules_gs_short_title'),
           description: tr('rules_gs_short_desc'),
           color: Colors.purple,
-          label: 'STM32 Running >',
-          value: _service.gsShortRunningThreshold,
-          defaultValue: ThresholdSettingsService.defaultGsShortRunningThreshold,
-          onSave: (v) => _service.setGsShortRunningThreshold(v),
+          fields: [
+            _FieldConfig(label: 'STM32 Running >', value: _service.gsShortRunningThreshold,
+              defaultValue: ThresholdSettingsService.defaultGsShortRunningThreshold,
+              onSave: (v) => _service.setGsShortRunningThreshold(v)),
+            _FieldConfig(label: 'Arduino Running Min', value: _service.gsShortArduinoRunningMin,
+              defaultValue: ThresholdSettingsService.defaultGsShortArduinoRunningMin,
+              onSave: (v) => _service.setGsShortArduinoRunningMin(v)),
+            _FieldConfig(label: 'Arduino Running Max', value: _service.gsShortArduinoRunningMax,
+              defaultValue: ThresholdSettingsService.defaultGsShortArduinoRunningMax,
+              onSave: (v) => _service.setGsShortArduinoRunningMax(v)),
+          ],
           onReset: () async {
             await _service.setGsShortRunningThreshold(ThresholdSettingsService.defaultGsShortRunningThreshold);
+            await _service.setGsShortArduinoRunningMin(ThresholdSettingsService.defaultGsShortArduinoRunningMin);
+            await _service.setGsShortArduinoRunningMax(ThresholdSettingsService.defaultGsShortArduinoRunningMax);
             _showResetSnack();
           },
         ),
@@ -415,7 +428,7 @@ class _DetectionRulesPageState extends State<DetectionRulesPage> {
           color: Colors.cyan,
           sensorId: 19,
           defaultArduinoRange: const ThresholdRange(min: 190, max: 260),
-          defaultStm32Range: const ThresholdRange(min: 930, max: 980),
+          defaultStm32Range: const ThresholdRange(min: 855, max: 875),
         ),
         // PressureWater
         _buildSensorDualRangeCard(
@@ -424,7 +437,7 @@ class _DetectionRulesPageState extends State<DetectionRulesPage> {
           color: Colors.cyan,
           sensorId: 20,
           defaultArduinoRange: const ThresholdRange(min: 190, max: 260),
-          defaultStm32Range: const ThresholdRange(min: 930, max: 980),
+          defaultStm32Range: const ThresholdRange(min: 855, max: 875),
         ),
         // MCUtemp
         _buildSensorDualRangeCard(

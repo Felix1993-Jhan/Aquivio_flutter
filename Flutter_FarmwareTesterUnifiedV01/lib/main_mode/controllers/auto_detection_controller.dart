@@ -531,6 +531,9 @@ mixin AutoDetectionController<T extends StatefulWidget> on State<T>, DebugHistor
     final testedShortPairs = <String>{};
     final useOptimization = thresholdService.adjacentShortTestOptimization;
 
+    // D極與12V短路保護閾值
+    final int d12vProtectionThreshold = thresholdService.d12vShortArduinoThreshold;
+
     // 逐一測試所有 18 個硬體腳位
     for (int testId = 0; testId < 18; testId++) {
       if (isAutoDetectionCancelled) return;
@@ -544,6 +547,14 @@ mixin AutoDetectionController<T extends StatefulWidget> on State<T>, DebugHistor
         '${tr('auto_detection_step_adjacent')} (${testId + 1}/18)',
         progress,
       );
+
+      // ===== D極與12V短路保護 =====
+      // 如果 Arduino Idle > 1000，表示 D極可能與12V短路
+      // 跳過此 ID 的 GPIO 開啟和 Running 操作，避免導通後燒毀 MOSFET
+      if (arduinoIdleValues.containsKey(testId) &&
+          arduinoIdleValues[testId]! > d12vProtectionThreshold) {
+        continue;
+      }
 
       // 設定當前測試項目高亮
       // 主要高亮：測試腳位在 Running 區域
@@ -1462,7 +1473,7 @@ mixin AutoDetectionController<T extends StatefulWidget> on State<T>, DebugHistor
   /// 2. MOSFET 異常偵測：
   ///   - G-D 短路：Arduino Idle ~0, Running 380~440, STM32 Running 460~530
   ///   - D 極接地：Arduino Idle ~0, Running ~0
-  ///   - D-S 短路：Arduino/STM32 Idle 落在 Running 範圍
+  ///   - D-S 短路：Arduino Idle 偏低 (25~60)，STM32 Idle/Running 都接近 0
   ///   - G 極接地：Arduino Idle 正常, Running 維持 Idle 值, STM32 Running 很低
   ///   - G-S 短路：STM32 Running > 400 且 Idle < 50
   /// - GPIO 卡在 ON：Idle > 150
@@ -1480,11 +1491,15 @@ mixin AutoDetectionController<T extends StatefulWidget> on State<T>, DebugHistor
     final int gdShortStm32RunningMin = thresholdService.gdShortStm32RunningMin;
     final int gdShortStm32RunningMax = thresholdService.gdShortStm32RunningMax;
 
-    // D-S 短路閾值（Idle 落在 Running 範圍）
+    // D-S 短路閾值（D-S 導通，STM32 Idle/Running 都接近 0）
     final int dsShortArduinoIdleMin = thresholdService.dsShortArduinoIdleMin;
     final int dsShortArduinoIdleMax = thresholdService.dsShortArduinoIdleMax;
     final int dsShortStm32IdleMin = thresholdService.dsShortStm32IdleMin;
     final int dsShortStm32IdleMax = thresholdService.dsShortStm32IdleMax;
+    final int dsShortStm32RunningMax = thresholdService.dsShortStm32RunningMax;
+
+    // D極與12V短路偵測閾值
+    final int d12vShortArduinoThreshold = thresholdService.d12vShortArduinoThreshold;
 
     // 只對硬體 ID (0-17) 進行診斷
     for (int id = 0; id < 18; id++) {
@@ -1494,11 +1509,22 @@ mixin AutoDetectionController<T extends StatefulWidget> on State<T>, DebugHistor
       final arduinoIdleData = dataStorage.getArduinoFirstIdleData(id);
       final arduinoRunningData = dataStorage.getArduinoLatestRunningData(id);
 
+      final displayName = DisplayNames.getName(id);
+
+      // ===== D極與12V短路偵測（最優先，在 Running null 檢查之前）=====
+      // 步驟 3 中已跳過此 ID 的 Running 操作（保護 MOSFET），因此不會有 Running 數據
+      // 只需檢查 Arduino Idle > 1000 即可判定
+      if (thresholdService.showMosfetDetection &&
+          arduinoIdleData != null &&
+          arduinoIdleData.value > d12vShortArduinoThreshold) {
+        _d12vShortItems.add('$displayName (ID$id)');
+        continue; // 已判定為 D極與12V短路，跳過後續診斷
+      }
+
       if (stm32IdleData == null || stm32RunningData == null) continue;
 
       final stm32Idle = stm32IdleData.value;
       final stm32Running = stm32RunningData.value;
-      final displayName = DisplayNames.getName(id);
 
       // Arduino 數據（用於 MOSFET 異常和線材錯誤偵測）
       final arduinoIdle = arduinoIdleData?.value;
@@ -1536,19 +1562,10 @@ mixin AutoDetectionController<T extends StatefulWidget> on State<T>, DebugHistor
       }
 
       // ===== MOSFET 異常偵測 =====
+      // 注意：D極與12V短路已在迴圈開頭優先偵測（Running null 檢查之前）
       if (thresholdService.showMosfetDetection) {
         // 需要 Arduino 數據來判斷 MOSFET 異常
         if (arduinoIdle != null && arduinoRunning != null) {
-          // --- D極與12V短路偵測（最優先判斷）---
-          // 特徵：Arduino Idle 和 Running 都接近飽和值（>1000），表示 D極被 12V 強制拉高
-          // Arduino 是 10-bit ADC，最大值 1023，大於 1000 基本上就是有問題
-          final int d12vShortArduinoThreshold = thresholdService.d12vShortArduinoThreshold;
-          if (arduinoIdle > d12vShortArduinoThreshold &&
-              arduinoRunning > d12vShortArduinoThreshold) {
-            _d12vShortItems.add('$displayName (ID$id)');
-            continue; // 已判定為 D極與12V短路，跳過後續診斷
-          }
-
           // --- G-D 短路偵測（必須先於 D 極接地檢測）---
           // 特徵：Arduino Idle 接近 0，但 Running 有數值 (380~440)，STM32 Running 有數值 (460~530)
           if (arduinoIdle < arduinoVssThreshold &&
@@ -1561,12 +1578,13 @@ mixin AutoDetectionController<T extends StatefulWidget> on State<T>, DebugHistor
           }
 
           // --- D-S 短路偵測 ---
-          // 特徵：Arduino 和 STM32 的 Idle 值落在 Running 範圍內
-          // Arduino Idle 落在 Running 範圍 (25~60)，且 STM32 Idle 落在 Running 範圍 (330~375)
+          // 特徵：D-S 導通，Arduino Idle 偏低 (25~60)，STM32 Idle 和 Running 都接近 0
+          // Arduino Idle 落在低值範圍 (25~60)，STM32 Idle < 10 且 Running < 10
           if (arduinoIdle >= dsShortArduinoIdleMin &&
               arduinoIdle <= dsShortArduinoIdleMax &&
               stm32Idle >= dsShortStm32IdleMin &&
-              stm32Idle <= dsShortStm32IdleMax) {
+              stm32Idle <= dsShortStm32IdleMax &&
+              stm32Running <= dsShortStm32RunningMax) {
             _gsShortItems.add('$displayName (ID$id) - D-S短路');
             continue; // 已判定為 D-S 短路，跳過後續診斷
           }
@@ -1579,7 +1597,7 @@ mixin AutoDetectionController<T extends StatefulWidget> on State<T>, DebugHistor
           }
 
           // --- G 極接地偵測 ---
-          // 特徵：Arduino Idle 正常 (~799)，Running 也維持在 Idle 附近 (~808)
+          // 特徵：Arduino Idle ���常 (~799)，Running 也維持在 Idle 附近 (~808)
           //       STM32 Idle 很低 (3)，Running 也很低 (39)
           // 與負載未連接的差異：Arduino Idle/Running 都正常，但 STM32 數值很低
           if (arduinoIdle >= arduinoIdleNormalMin &&
@@ -1589,14 +1607,17 @@ mixin AutoDetectionController<T extends StatefulWidget> on State<T>, DebugHistor
             _gsShortItems.add('$displayName (ID$id) - G極接地');
             continue; // 已判定為 G 極接地，跳過後續診斷
           }
-        }
 
-        // --- G-S 短路偵測 ---
-        // 條件：STM32 Running > 400 且 Idle < 50 → G-S 短路
-        if (stm32Running > thresholdService.gsShortRunningThreshold &&
-            stm32Idle < thresholdService.loadDetectionIdleThreshold) {
-          _gsShortItems.add('$displayName (ID$id) - G-S短路');
-          continue; // 已判定為 G-S 短路，跳過後續診斷
+          // --- G-S 短路偵測 ---
+          // 特徵：Arduino Running 維持在 Idle 水平 (700~850)，MOSFET 無法正常開啟
+          //       STM32 Running 偏高 (>400)，STM32 Idle 接近 0 (<50)
+          if (arduinoRunning >= thresholdService.gsShortArduinoRunningMin &&
+              arduinoRunning <= thresholdService.gsShortArduinoRunningMax &&
+              stm32Running > thresholdService.gsShortRunningThreshold &&
+              stm32Idle < thresholdService.loadDetectionIdleThreshold) {
+            _gsShortItems.add('$displayName (ID$id) - G-S短路');
+            continue; // 已判定為 G-S 短路，跳過後續診斷
+          }
         }
       }
 

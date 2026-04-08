@@ -1523,7 +1523,7 @@ class _AutoDetectionPageState extends State<AutoDetectionPage> {
                     isDense: true,
                     style: TextStyle(fontSize: isCompact ? 10 : 11, color: Colors.black),
                     iconSize: 16,
-                    items: widget.availablePorts.map((port) {
+                    items: widget.availablePorts.toSet().map((port) {
                       return DropdownMenuItem(
                         value: port,
                         child: Text(port, style: TextStyle(fontSize: isCompact ? 10 : 11)),
@@ -1646,7 +1646,7 @@ class _AutoDetectionPageState extends State<AutoDetectionPage> {
                 isDense: true,
                 style: const TextStyle(fontSize: 9, color: Colors.black),
                 iconSize: 14,
-                items: widget.availablePorts.map((port) {
+                items: widget.availablePorts.toSet().map((port) {
                   return DropdownMenuItem(
                     value: port,
                     child: Text(port, style: const TextStyle(fontSize: 9)),
