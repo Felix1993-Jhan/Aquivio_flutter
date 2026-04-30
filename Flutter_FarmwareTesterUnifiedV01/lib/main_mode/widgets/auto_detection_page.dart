@@ -1778,7 +1778,9 @@ class _AutoDetectionPageState extends State<AutoDetectionPage> {
                         )
                       : DropdownButtonHideUnderline(
                           child: DropdownButton<String>(
-                            value: widget.selectedFirmwarePath,
+                            value: widget.firmwareFiles.any((f) => f.path == widget.selectedFirmwarePath)
+                                ? widget.selectedFirmwarePath
+                                : null,
                             dropdownColor: primaryColor,
                             icon: const Icon(Icons.arrow_drop_down, color: Colors.white, size: 18),
                             style: const TextStyle(color: Colors.white, fontSize: 12),

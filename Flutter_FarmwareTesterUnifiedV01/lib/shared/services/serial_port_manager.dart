@@ -37,13 +37,26 @@ class SerialPortManager with ArduinoConnectionMixin {
   /// 當連接狀態變化時會自動通知 UI 更新連接指示燈
   final ValueNotifier<bool> isConnectedNotifier = ValueNotifier(false);
 
-  /// 接收緩衝區 - 用於累積不完整的位元組資料
+  /// 接收緩衝區 - 用於累積不完整的位元組資料（文字模式 Arduino 用）
   ///
   /// 為什麼需要緩衝區？
   /// 1. 串口資料可能分多次到達（例如一行文字分成 3 次傳送）
   /// 2. UTF-8 編碼的中文字元占用 3 個 bytes，可能被切斷
   /// 3. 需要等待收到換行符才能確定一行資料完整
   final List<int> _receiveBuffer = [];
+
+  /// HEX 模式接收緩衝區（STM32 用）
+  ///
+  /// USB Serial 是純粹的位元組串流，封包可能分多次到達。
+  /// 例如 35 bytes 的回應可能拆成 20 + 15 bytes 兩次。
+  /// 需要緩衝區累積 bytes 直到拼成完整封包。
+  final List<int> _hexReceiveBuffer = [];
+
+  /// 已偵測到的 STM32 協定格式
+  /// - null: 尚未偵測（首次連接時自動偵測）
+  /// - false: 舊版協定（固定 9 bytes，韌體 ≤ 0.0.0.6）
+  /// - true: 新版協定（含 DataLen byte，動態長度，韌體 ≥ 0.0.0.7）
+  bool? _isNewProtocol;
 
   /// 是否為文字模式
   /// - true（預設）: Arduino 用，接收的是 UTF-8 文字
@@ -298,6 +311,8 @@ class SerialPortManager with ArduinoConnectionMixin {
 
     _currentPortName = null;
     _receiveBuffer.clear();  // 清空接收緩衝區，避免殘留數據影響下次連線
+    _hexReceiveBuffer.clear();  // 清空 HEX 模式緩衝區
+    _isNewProtocol = null;  // 重置協定偵測，下次連接時重新偵測
     // 重置韌體版本，以便下次連接時可以重新觸發驗證
     firmwareVersionNotifier.value = null;
     isConnectedNotifier.value = false;
@@ -314,6 +329,8 @@ class SerialPortManager with ArduinoConnectionMixin {
 
     _currentPortName = null;
     _receiveBuffer.clear();
+    _hexReceiveBuffer.clear();
+    _isNewProtocol = null;
     // 重置韌體版本，以便下次連接時可以重新觸發驗證
     firmwareVersionNotifier.value = null;
     isConnectedNotifier.value = false;
@@ -576,33 +593,212 @@ class SerialPortManager with ArduinoConnectionMixin {
         }
       }
     } else {
-      // HEX 模式處理（UR）
-      // 先解析回應，判斷是否為心跳回應
-      final isHeartbeatResponse = _parseUrReadResponse(data);
-
-      // 心跳回應不記錄日誌，避免干擾
-      if (!isHeartbeatResponse) {
-        String hexStr = data
-            .map((e) => e.toRadixString(16).padLeft(2, '0').toUpperCase())
-            .join(' ');
-
-        String text = String.fromCharCodes(data)
-            .replaceAll('\r', '')
-            .replaceAll('\n', ' ')
-            .trim();
-
-        if (text.isNotEmpty && _isPrintable(text)) {
-          _log('接收: $hexStr ($text)');
-        } else {
-          _log('接收: $hexStr');
-        }
-      }
+      // HEX 模式處理（STM32）— 累積到緩衝區再組裝封包
+      _hexReceiveBuffer.addAll(data);
+      _processHexBuffer();
     }
   }
 
   /// 檢查字串是否全部為可列印的 ASCII 字元
   bool _isPrintable(String s) {
     return s.runes.every((r) => r >= 32 && r < 127);
+  }
+
+  // ============================================================================
+  // HEX 模式封包組裝（STM32 動態長度支援）
+  // ============================================================================
+  //
+  // 支援兩種封包格式：
+  //
+  // 舊版（韌體 ≤ 0.0.0.6）— 固定 9 bytes：
+  //   [Header 3B] [Cmd 1B] [Data 4B] [CS 1B]
+  //
+  // 新版（韌體 ≥ 0.0.0.7）— 動態長度（僅 0x05 指令）：
+  //   [Header 3B] [Cmd 1B] [DataLen 1B] [Data N bytes] [CS 1B]
+  //   總長度 = 5 + N + 1 = 6 + N
+  //
+  // 自動偵測邏輯：首次收到 0x05 回應時，先嘗試 9-byte CS 驗證。
+  // 若匹配且版本 ≤ 0.0.0.6 → 舊版；否則嘗試新版格式（byte[4] 作為 DataLen）。
+  // ============================================================================
+
+  /// 舊版韌體最大版本值（用於自動偵測協定格式）
+  /// 版本 0.0.0.6 → versionValue = 6
+  static const int _oldProtocolMaxVersion = 6;
+
+  /// 處理 HEX 模式緩衝區中的封包
+  ///
+  /// 從緩衝區中搜尋完整封包，驗證後交給 _parseUrReadResponse 解析。
+  /// 支援封包跨越多次讀取的情況（USB Serial 位元組串流特性）。
+  void _processHexBuffer() {
+    while (_hexReceiveBuffer.length >= 9) {
+      // 1. 搜尋封包 header [0x40, 0x71, 0x30]
+      final headerIdx = _findHexHeader();
+      if (headerIdx < 0) {
+        // 找不到 header，保留最後 2 bytes（可能是不完整的 header 開頭）
+        if (_hexReceiveBuffer.length > 2) {
+          _hexReceiveBuffer.removeRange(0, _hexReceiveBuffer.length - 2);
+        }
+        return;
+      }
+
+      // 丟棄 header 之前的垃圾 bytes
+      if (headerIdx > 0) {
+        _hexReceiveBuffer.removeRange(0, headerIdx);
+      }
+
+      // 2. 判斷期望的封包長度
+      final expectedLen = _getExpectedPacketLength();
+      if (expectedLen == null) return;  // 資料不足，等待下次讀取
+      if (expectedLen < 0) {
+        // 無效封包（新舊格式 CS 都不匹配），跳過此 header byte 繼續搜尋
+        _hexReceiveBuffer.removeAt(0);
+        continue;
+      }
+
+      // 3. 等待封包完整到達
+      if (_hexReceiveBuffer.length < expectedLen) return;
+
+      // 4. 取出封包並驗證 checksum
+      final packet = Uint8List.fromList(
+        _hexReceiveBuffer.sublist(0, expectedLen),
+      );
+      if (!_verifyChecksum(packet)) {
+        // CS 驗證失敗，跳過此 header
+        _hexReceiveBuffer.removeAt(0);
+        continue;
+      }
+
+      // 5. 消耗已處理的 bytes
+      _hexReceiveBuffer.removeRange(0, expectedLen);
+
+      // 6. 解析封包
+      final isHeartbeat = _parseUrReadResponse(packet);
+
+      // 7. 非心跳回應記錄日誌
+      if (!isHeartbeat) {
+        _logHexPacket(packet);
+      }
+    }
+  }
+
+  /// 在緩衝區中搜尋 STM32 封包 header [0x40, 0x71, 0x30]
+  /// 返回 header 起始位置，找不到返回 -1
+  int _findHexHeader() {
+    for (int i = 0; i <= _hexReceiveBuffer.length - 3; i++) {
+      if (_hexReceiveBuffer[i] == 0x40 &&
+          _hexReceiveBuffer[i + 1] == 0x71 &&
+          _hexReceiveBuffer[i + 2] == 0x30) {
+        return i;
+      }
+    }
+    return -1;
+  }
+
+  /// 根據命令碼和協定版本判斷封包的期望長度
+  ///
+  /// 返回值：
+  /// - 正整數: 期望的封包長度
+  /// - null: 資料不足以判斷，需等待更多 bytes
+  /// - -1: 無效封包（新舊格式都不匹配）
+  int? _getExpectedPacketLength() {
+    // 至少需要 5 bytes（header 3 + cmd 1 + 第一個 data/len byte 1）
+    if (_hexReceiveBuffer.length < 5) return null;
+
+    final cmd = _hexReceiveBuffer[3];
+
+    // 非 0x05 命令（GPIO、ADC 等）：固定 9 bytes
+    if (cmd != 0x05) return 9;
+
+    // ---- 以下為 0x05（ping/韌體版本）命令的處理 ----
+
+    // 已確認新版協定：使用 DataLen byte 計算長度
+    if (_isNewProtocol == true) {
+      final n = _hexReceiveBuffer[4];
+      return 6 + n; // header(3) + cmd(1) + len(1) + data(n) + cs(1)
+    }
+
+    // 已確認舊版協定：固定 9 bytes
+    if (_isNewProtocol == false) return 9;
+
+    // ---- 尚未偵測：自動偵測協定格式 ----
+
+    // 需要至少 9 bytes 才能嘗試舊版格式
+    if (_hexReceiveBuffer.length < 9) return null;
+
+    // 嘗試 9-byte CS 驗證（舊版格式）
+    final sum9 = _hexReceiveBuffer
+        .sublist(0, 8)
+        .fold(0, (int prev, int e) => prev + e);
+    final expectedCs9 = (0x100 - (sum9 & 0xFF)) & 0xFF;
+
+    if (_hexReceiveBuffer[8] == expectedCs9) {
+      // 9-byte CS 匹配 — 再檢查版本是否合理（防止新版封包的巧合匹配）
+      final v1 = _hexReceiveBuffer[4];
+      final v2 = _hexReceiveBuffer[5];
+      final v3 = _hexReceiveBuffer[6];
+      final v4 = _hexReceiveBuffer[7];
+      final versionValue = (v4 << 24) | (v3 << 16) | (v2 << 8) | v1;
+
+      if (versionValue <= _oldProtocolMaxVersion) {
+        // 版本 ≤ 0.0.0.6 且 CS 匹配 → 確認為舊版協定
+        _isNewProtocol = false;
+        _log('🔍 偵測到舊版 STM32 協定（固定 9 bytes）');
+        return 9;
+      }
+      // 版本 > 0.0.0.6 但 9-byte CS 巧合匹配 → 繼續嘗試新版格式
+    }
+
+    // 嘗試新版格式：byte[4] 作為 DataLen
+    final n = _hexReceiveBuffer[4];
+    final newLen = 6 + n;
+
+    // 資料不足，等待更多 bytes
+    if (_hexReceiveBuffer.length < newLen) return null;
+
+    // 驗證新版格式的 CS
+    final sumNew = _hexReceiveBuffer
+        .sublist(0, newLen - 1)
+        .fold(0, (int prev, int e) => prev + e);
+    final expectedCsNew = (0x100 - (sumNew & 0xFF)) & 0xFF;
+
+    if (_hexReceiveBuffer[newLen - 1] == expectedCsNew) {
+      // 新版格式 CS 匹配 → 確認為新版協定
+      _isNewProtocol = true;
+      _log('🔍 偵測到新版 STM32 協定（動態長度，DataLen=$n）');
+      return newLen;
+    }
+
+    // 兩種格式都不匹配 → 無效封包
+    return -1;
+  }
+
+  /// 驗證封包的 checksum
+  /// CS = (0x100 - (前 N-1 bytes 總和 & 0xFF)) & 0xFF
+  bool _verifyChecksum(Uint8List data) {
+    if (data.length < 2) return false;
+    final sum = data
+        .sublist(0, data.length - 1)
+        .fold(0, (int prev, int e) => prev + e);
+    final expectedCs = (0x100 - (sum & 0xFF)) & 0xFF;
+    return data.last == expectedCs;
+  }
+
+  /// 記錄 HEX 封包日誌
+  void _logHexPacket(Uint8List packet) {
+    String hexStr = packet
+        .map((e) => e.toRadixString(16).padLeft(2, '0').toUpperCase())
+        .join(' ');
+
+    String text = String.fromCharCodes(packet)
+        .replaceAll('\r', '')
+        .replaceAll('\n', ' ')
+        .trim();
+
+    if (text.isNotEmpty && _isPrintable(text)) {
+      _log('接收: $hexStr ($text)');
+    } else {
+      _log('接收: $hexStr');
+    }
   }
 
   // ============================================================================
@@ -727,25 +923,29 @@ class SerialPortManager with ArduinoConnectionMixin {
   }
 
   /// 解析 UR 讀取命令回應
-  /// UR 回應格式: Header(3 bytes) + 命令(1 byte) + Data(4 bytes) + CS(1 byte)
-  /// 總共固定 9 bytes
+  ///
+  /// 支援兩種封包格式：
+  /// - 舊版（9 bytes）: [Header 3B] [Cmd 1B] [Data 4B] [CS 1B]
+  /// - 新版（6+N bytes）: [Header 3B] [Cmd 1B] [DataLen 1B] [Data NB] [CS 1B]
+  ///
+  /// 封包在進入此方法前已由 _processHexBuffer 完成 header 搜尋和 CS 驗證。
   /// 返回值: true 表示為心跳回應（0x05），不需記錄日誌；false 表示其他回應
   bool _parseUrReadResponse(Uint8List data) {
-    // STM32 回應固定為 9 bytes
-    if (data.length != 9) return false;
+    // 最小封包長度檢查
+    if (data.length < 9) return false;
 
     // 檢查 Header: 0x40 0x71 0x30
     if (data[0] != 0x40 || data[1] != 0x71 || data[2] != 0x30) return false;
 
-    // 驗證 checksum (前 8 bytes 的校驗)
-    final sum = data.sublist(0, 8).fold(0, (int prev, int e) => prev + e);
+    // 動態驗證 checksum（封包最後一個 byte）
+    final sum = data.sublist(0, data.length - 1).fold(0, (int prev, int e) => prev + e);
     final expectedCs = (0x100 - (sum & 0xFF)) & 0xFF;
-    if (data[8] != expectedCs) return false;
+    if (data.last != expectedCs) return false;
 
     final command = data[3];
 
-    // GPIO 開啟命令回應 (0x01)
-    if (command == 0x01) {
+    // GPIO 開啟命令回應 (0x01) — 固定 9 bytes
+    if (command == 0x01 && data.length == 9) {
       final lowByte = data[4];
       final midByte = data[5];
       final highByte = data[6];
@@ -754,8 +954,8 @@ class SerialPortManager with ArduinoConnectionMixin {
       onGpioCommandConfirmed?.call(0x01, bitMask);
       return false;  // 不是心跳回應
     }
-    // GPIO 關閉命令回應 (0x02)
-    else if (command == 0x02) {
+    // GPIO 關閉命令回應 (0x02) — 固定 9 bytes
+    else if (command == 0x02 && data.length == 9) {
       final lowByte = data[4];
       final midByte = data[5];
       final highByte = data[6];
@@ -764,8 +964,8 @@ class SerialPortManager with ArduinoConnectionMixin {
       onGpioCommandConfirmed?.call(0x02, bitMask);
       return false;  // 不是心跳回應
     }
-    // 讀取命令回應 (0x03)
-    else if (command == 0x03) {
+    // 讀取命令回應 (0x03) — 固定 9 bytes
+    else if (command == 0x03 && data.length == 9) {
       final id = data[4];
       final value = data[5] | (data[6] << 8) | (data[7] << 16);
       final result = _formatReadResult(id, value);
@@ -775,12 +975,26 @@ class SerialPortManager with ArduinoConnectionMixin {
       return false;  // 不是心跳回應
     }
     // 韌體版本回應 (0x05) - 也作為心跳回應
-    // 格式: 40 71 30 05 [v1] [v2] [v3] [v4] CS
+    // 舊版格式（9 bytes）: 40 71 30 05 [v1] [v2] [v3] [v4] CS
+    // 新版格式（6+N bytes）: 40 71 30 05 [N] [v1] [v2] [v3] [v4] [extra...] CS
     else if (command == 0x05) {
-      final v1 = data[4];  // 最低位元
-      final v2 = data[5];
-      final v3 = data[6];
-      final v4 = data[7];  // 最高位元
+      int v1, v2, v3, v4;
+
+      if (data.length == 9) {
+        // 舊版格式：版本在 data[4..7]
+        v1 = data[4];  // 最低位元
+        v2 = data[5];
+        v3 = data[6];
+        v4 = data[7];  // 最高位元
+      } else {
+        // 新版格式：data[4] = DataLen，版本在 data[5..8]
+        // 額外資料（data[9] ~ data[data.length-2]）暫時忽略
+        v1 = data[5];
+        v2 = data[6];
+        v3 = data[7];
+        v4 = data[8];
+      }
+
       final versionStr = '$v4.$v3.$v2.$v1';
 
       // 處理心跳回應（STM32 的心跳使用 0x05 指令）
