@@ -27,8 +27,8 @@ lib/
 ├── main.dart                    # 入口，視窗初始化
 ├── mode_selection_page.dart     # 模式選擇，自動偵測 Arduino
 ├── config/app_mode.dart         # AppMode 列舉
-├── main_mode/                   # Main Board 模式（詳見 main_mode/CLAUDE.md）
-├── bodydoor_mode/               # Body&Door 模式（詳見 bodydoor_mode/CLAUDE.md）
+├── main_mode/                   # Main Board 模式（詳見 aidocs/main_mode.md）
+├── bodydoor_mode/               # Body&Door 模式（詳見 aidocs/bodydoor_mode.md）
 └── shared/                      # 共用模組
     ├── language_state.dart           # globalLanguageNotifier
     ├── services/
@@ -100,3 +100,17 @@ lib/
 - **導航**：`Navigator.pushReplacement` 避免堆疊
 - **依賴**：`flutter_libserialport` ^0.6.0 / `shared_preferences` ^2.2.2 / `window_manager` ^0.4.3 / `file_picker` ^8.0.0
 - **Monorepo**：位於 `Aquivio_flutter/Flutter_FarmwareTesterUnifiedV01/`，GitHub Actions 自動建構 Windows + Linux
+
+---
+
+## AI 文件索引（aidocs/）
+
+詳細模式文件與路徑引導已統一放置於 `aidocs/` 資料夾：
+
+| 文件 | 路徑 | 說明 |
+|------|------|------|
+| Main Board 模式 | `aidocs/main_mode.md` | 雙串��通訊、Mixin 組合、STM32 協定、韌體燒錄 |
+| Body&Door 模式 | `aidocs/bodydoor_mode.md` | 單串口通訊、Mixin 組合、與 Main Board 差異 |
+| 串口通訊協定 | `aidocs/serial_protocol.md` | Arduino/STM32 完整通訊協定、封包格式、ADC 對應表 |
+| 路徑引導 | `aidocs/path_guide.md` | 專案所有關鍵檔案路徑總覽 |
+| Flutter UI 模式 | `aidocs/flutter_ui_patterns.md` | 17 項常見佈局問題與標準解法、程式碼範例 |
