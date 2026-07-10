@@ -52,10 +52,13 @@ class SerialPortManager with ArduinoConnectionMixin {
   /// 需要緩衝區累積 bytes 直到拼成完整封包。
   final List<int> _hexReceiveBuffer = [];
 
-  /// 已偵測到的 STM32 協定格式
-  /// - null: 尚未偵測（首次連接時自動偵測）
-  /// - false: 舊版協定（固定 9 bytes，韌體 ≤ 0.0.0.6）
-  /// - true: 新版協定（含 DataLen byte，動態長度，韌體 ≥ 0.0.0.7）
+  /// 已偵測到的 STM32 協定格式（每次連線重新偵測，斷線時於 close() 重置為 null）
+  /// - null: 尚未偵測
+  /// - false: 舊版協定（固定 9 bytes，header + cmd + data 4B + CS）
+  /// - true: 新版協定（含 DataLen byte，動態長度，header + cmd + len + data N + CS）
+  ///
+  /// 判別方式：純 CS 驗證。9-byte CS 對 → 舊版；不對則嘗試 byte[4] 作為 DataLen 的新版格式。
+  /// 不依賴韌體版本號判斷，韌體 ping 長度變動時軟體無需修改。
   bool? _isNewProtocol;
 
   /// 是否為文字模式
@@ -610,20 +613,17 @@ class SerialPortManager with ArduinoConnectionMixin {
   //
   // 支援兩種封包格式：
   //
-  // 舊版（韌體 ≤ 0.0.0.6）— 固定 9 bytes：
+  // 舊版 — 固定 9 bytes：
   //   [Header 3B] [Cmd 1B] [Data 4B] [CS 1B]
   //
-  // 新版（韌體 ≥ 0.0.0.7）— 動態長度（僅 0x05 指令）：
+  // 新版 — 動態長度（僅 0x05 指令）：
   //   [Header 3B] [Cmd 1B] [DataLen 1B] [Data N bytes] [CS 1B]
   //   總長度 = 5 + N + 1 = 6 + N
   //
   // 自動偵測邏輯：首次收到 0x05 回應時，先嘗試 9-byte CS 驗證。
-  // 若匹配且版本 ≤ 0.0.0.6 → 舊版；否則嘗試新版格式（byte[4] 作為 DataLen）。
+  // 若 CS 匹配 → 舊版；否則嘗試新版格式（byte[4] 作為 DataLen，再次驗證 CS）。
+  // 不依賴版本號分界，純 CS 驗證足以區分兩種格式。
   // ============================================================================
-
-  /// 舊版韌體最大版本值（用於自動偵測協定格式）
-  /// 版本 0.0.0.6 → versionValue = 6
-  static const int _oldProtocolMaxVersion = 6;
 
   /// 處理 HEX 模式緩衝區中的封包
   ///
@@ -732,20 +732,12 @@ class SerialPortManager with ArduinoConnectionMixin {
     final expectedCs9 = (0x100 - (sum9 & 0xFF)) & 0xFF;
 
     if (_hexReceiveBuffer[8] == expectedCs9) {
-      // 9-byte CS 匹配 — 再檢查版本是否合理（防止新版封包的巧合匹配）
-      final v1 = _hexReceiveBuffer[4];
-      final v2 = _hexReceiveBuffer[5];
-      final v3 = _hexReceiveBuffer[6];
-      final v4 = _hexReceiveBuffer[7];
-      final versionValue = (v4 << 24) | (v3 << 16) | (v2 << 8) | v1;
-
-      if (versionValue <= _oldProtocolMaxVersion) {
-        // 版本 ≤ 0.0.0.6 且 CS 匹配 → 確認為舊版協定
-        _isNewProtocol = false;
-        _log('🔍 偵測到舊版 STM32 協定（固定 9 bytes）');
-        return 9;
-      }
-      // 版本 > 0.0.0.6 但 9-byte CS 巧合匹配 → 繼續嘗試新版格式
+      // 9-byte CS 匹配 → 確認為舊版協定
+      // CS 驗證（1/256 強度）加上 header [0x40 0x71 0x30] 篩選後，
+      // 巧合匹配機率極低，且 _parseUrReadResponse 會再次驗證 CS，無需用版本號二次防護
+      _isNewProtocol = false;
+      _log('🔍 偵測到舊版 STM32 協定（固定 9 bytes）');
+      return 9;
     }
 
     // 嘗試新版格式：byte[4] 作為 DataLen
