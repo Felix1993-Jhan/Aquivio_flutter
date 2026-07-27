@@ -290,7 +290,13 @@ class ReportExcelExporter {
         final v = _valueOf(values, device);
         if (v == null) continue;
 
-        final bg = _bgFor(section, device, id, v);
+        var bg = _bgFor(section, device, id, v);
+        // 溫差過大：STM32 溫度值強制標紅（高機率感測器故障）
+        if (section == ReportSection.sensor &&
+            device == ReportDevice.stm32 &&
+            snap.tempDiffErrorIds.contains(id)) {
+          bg = _sensorHigh;
+        }
         _setNum(sheet, baseCol + s, row, v, bg: bg);
       }
     }

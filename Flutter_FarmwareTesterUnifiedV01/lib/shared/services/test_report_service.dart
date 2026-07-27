@@ -51,6 +51,12 @@ class ReportConfig {
   /// 與 UI 顯示邏輯一致，避免報告數值 / 上色與畫面不符
   final Set<int> arduinoDiv10Ids;
 
+  /// 需要做「溫差比對」的溫度感測 ID（STM32 值與 Arduino 參考溫度比對）
+  final Set<int> tempDiffIds;
+
+  /// 溫差比對的 Arduino 參考溫度 ID（Main：MCUtemp = 21）
+  final int tempRefId;
+
   const ReportConfig({
     required this.modeName,
     required this.filePrefix,
@@ -62,6 +68,8 @@ class ReportConfig {
     required this.hasResistance,
     this.resistanceId = 0xF0,
     this.arduinoDiv10Ids = const {},
+    this.tempDiffIds = const {},
+    this.tempRefId = -1,
   });
 
   /// Main Board 設定
@@ -83,6 +91,8 @@ class ReportConfig {
       hasOffset: true,
       hasResistance: true,
       arduinoDiv10Ids: {21}, // MCUtemp Arduino ÷10（與畫面一致）
+      tempDiffIds: {21, 22, 23}, // MCUtemp / WATERtemp / BIBtemp 溫差比對
+      tempRefId: 21, // 以 Arduino MCUtemp 為參考
     );
   }
 
@@ -137,6 +147,10 @@ class TestSnapshot {
   /// offset 平均（hwIds 的 offset 平均）；無 offset 模式為 null
   final double? offsetAvg;
 
+  /// 溫差過大的溫度感測 ID（STM32 值與 Arduino 參考溫差超過閾值 → 高機率感測器壞）
+  /// 報告中這些 ID 的 STM32 值會標紅
+  final Set<int> tempDiffErrorIds;
+
   /// 擷取時間
   final DateTime time;
 
@@ -146,6 +160,7 @@ class TestSnapshot {
     required this.sensor,
     required this.rValue,
     required this.offsetAvg,
+    required this.tempDiffErrorIds,
     required this.time,
   });
 }
@@ -216,8 +231,9 @@ class TestReportService {
   TestSnapshot captureCurrentResults(
     DataStorageService ds, {
     DateTime? now,
+    int Function(int id)? diffThreshold,
   }) {
-    final snapshot = _buildSnapshot(ds, now ?? sessionStart);
+    final snapshot = _buildSnapshot(ds, now ?? sessionStart, diffThreshold);
 
     var board = _currentBoard;
     if (board == null) {
@@ -229,7 +245,8 @@ class TestReportService {
   }
 
   /// 建立一份快照（讀取 DataStorageService 當下的值，依 config 取捨）
-  TestSnapshot _buildSnapshot(DataStorageService ds, DateTime time) {
+  TestSnapshot _buildSnapshot(
+      DataStorageService ds, DateTime time, int Function(int id)? diffThreshold) {
     final idle = <int, ChannelValues>{};
     final running = <int, ChannelValues>{};
 
@@ -274,12 +291,26 @@ class TestReportService {
         ? null
         : offsets.reduce((a, b) => a + b) / offsets.length;
 
+    // 溫差比對：STM32 溫度與 Arduino 參考溫度(tempRefId)差距超過閾值 → 標記異常
+    final tempDiffErrorIds = <int>{};
+    final refTemp = sensor[config.tempRefId]?.arduino;
+    if (refTemp != null && diffThreshold != null) {
+      for (final id in config.tempDiffIds) {
+        final stm32Temp = sensor[id]?.stm32;
+        if (stm32Temp != null &&
+            (refTemp - stm32Temp).abs() > diffThreshold(id)) {
+          tempDiffErrorIds.add(id);
+        }
+      }
+    }
+
     return TestSnapshot(
       idle: idle,
       running: running,
       sensor: sensor,
       rValue: rValue,
       offsetAvg: offsetAvg,
+      tempDiffErrorIds: tempDiffErrorIds,
       time: time,
     );
   }

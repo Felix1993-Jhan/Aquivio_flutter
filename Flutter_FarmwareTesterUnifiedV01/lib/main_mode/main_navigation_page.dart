@@ -1971,7 +1971,10 @@ class _MainNavigationPageState extends State<MainNavigationPage>
   /// → 擷取一份快照到當前編號，並自動存檔到桌面
   @override
   void onAutoDetectionCompleted() {
-    _reportService.captureCurrentResults(_dataStorage);
+    _reportService.captureCurrentResults(
+      _dataStorage,
+      diffThreshold: (id) => ThresholdSettingsService().getDiffThreshold(id),
+    );
     _autoSaveReport();
   }
 
