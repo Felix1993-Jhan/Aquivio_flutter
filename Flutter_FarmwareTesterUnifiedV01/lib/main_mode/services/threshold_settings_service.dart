@@ -22,6 +22,12 @@ enum DeviceType { arduino, stm32 }
 /// 硬體狀態類型
 enum StateType { idle, running }
 
+/// STM32 運轉兩段判定結果
+/// - pass1：首次偵測通過（高群 240±35，深藍）
+/// - pass2：二次偵測通過（低群 170±35，淺藍）—— SR540 混批 Vf 低群
+/// - fail：兩段都不過（紅）
+enum Stm32RunResult { pass1, pass2, fail }
+
 /// 閾值設定服務（單例模式）
 class ThresholdSettingsService with ThresholdStorageMixin {
   static final ThresholdSettingsService _instance = ThresholdSettingsService._internal();
@@ -158,8 +164,8 @@ class ThresholdSettingsService with ThresholdStorageMixin {
   /// STM32 感測器預設範圍 (ID 18-23)
   static const Map<int, ThresholdRange> _defaultStm32Sensor = {
     18: ThresholdRange(min: 0, max: 10000),    // Flow
-    19: ThresholdRange(min: 855, max: 875),    // PressureCO2
-    20: ThresholdRange(min: 855, max: 875),    // PressureWater
+    19: ThresholdRange(min: 835, max: 875),    // PressureCO2（下限往下放寬 20：855→835）
+    20: ThresholdRange(min: 835, max: 875),    // PressureWater（下限往下放寬 20：855→835）
     21: ThresholdRange(min: -20, max: 100),    // MCUtemp (溫度範圍 -20~100)
     22: ThresholdRange(min: -20, max: 100),    // WATERtemp (溫度範圍 -20~100)
     23: ThresholdRange(min: -20, max: 100),    // BIBtemp (溫度範圍 -20~100)
@@ -404,6 +410,24 @@ class ThresholdSettingsService with ThresholdStorageMixin {
   // saveIntMap, notifyUpdate 方法
 
   // ==================== 取得設定值 ====================
+
+  // ==================== STM32 運轉兩段判定（所有腳位通用）====================
+  // 因 SR540 蕭特基混批，運轉 ADC 值分兩群：高群 ~240、低群 ~170。
+  // 同一筆值先用高群範圍判，不過再用低群範圍判，兩群在 205 相接。
+  static const int stm32RunTier1Center = 240; // 高群中心
+  static const int stm32RunTier2Center = 170; // 低群中心
+  static const int stm32RunTolerance = 35;
+
+  /// STM32 運轉值兩段判定（通用，不分腳位）
+  Stm32RunResult evaluateStm32Running(int value) {
+    if ((value - stm32RunTier1Center).abs() <= stm32RunTolerance) {
+      return Stm32RunResult.pass1;
+    }
+    if ((value - stm32RunTier2Center).abs() <= stm32RunTolerance) {
+      return Stm32RunResult.pass2;
+    }
+    return Stm32RunResult.fail;
+  }
 
   /// 取得硬體閾值範圍
   ThresholdRange getHardwareThreshold(DeviceType device, StateType state, int id) {
@@ -810,7 +834,12 @@ class ThresholdSettingsService with ThresholdStorageMixin {
   // ==================== 驗證方法 ====================
 
   /// 驗證硬體數值是否在閾值範圍內
+  /// STM32 運轉：改用兩段判定（240±35 或 170±35 皆算過，SR540 混批兩群），
+  /// 讓表格、結果清單、各診斷全部用同一套判定，不會表格過、結果卻 FAIL
   bool validateHardwareValue(DeviceType device, StateType state, int id, int value) {
+    if (device == DeviceType.stm32 && state == StateType.running) {
+      return evaluateStm32Running(value) != Stm32RunResult.fail;
+    }
     final range = getHardwareThreshold(device, state, id);
     return range.isInRange(value);
   }

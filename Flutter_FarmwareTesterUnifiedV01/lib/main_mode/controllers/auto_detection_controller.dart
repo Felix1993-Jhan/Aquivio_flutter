@@ -470,6 +470,22 @@ mixin AutoDetectionController<T extends StatefulWidget> on State<T>, DebugHistor
     return arduinoManager.isConnected && urManager.isConnected;
   }
 
+  /// 讀取 STM32 offset（0x08 sub 0x05），重試到收到為止
+  /// 有時單發會漏掉那包 58-byte 回應，故重送最多 maxTry 次，收到即返回
+  Future<void> _readStm32OffsetWithRetry() async {
+    if (!urManager.isConnected) return;
+    const int maxTry = 5;
+    for (int attempt = 0; attempt < maxTry; attempt++) {
+      if (isAutoDetectionCancelled) return;
+      if (dataStorage.getStm32Offset(0) != null) return; // 已收到
+      urManager.sendHex(URCommandBuilder.buildCommand([0x08, 0x05, 0x00]));
+      for (int poll = 0; poll < 8; poll++) {
+        await Future.delayed(const Duration(milliseconds: 50));
+        if (dataStorage.getStm32Offset(0) != null) return;
+      }
+    }
+  }
+
   /// 步驟 2: 讀取無動作狀態 (Idle)
   /// 已改為在 _batchReadHardwareParallel 中針對單獨 ID 重試，不再全部重新輪詢
   Future<bool> _autoDetectionStep2ReadIdle() async {
@@ -480,16 +496,8 @@ mixin AutoDetectionController<T extends StatefulWidget> on State<T>, DebugHistor
     if (isAutoDetectionCancelled) return false;
 
     // 讀取 STM32 offset（命令 0x08 sub 0x05 READ OFFSET）：開機自校準基準值，一次回 26 組
-    // 早點讀，讓 Idle/Running 表格的 offset 欄在檢測過程中即可顯示
-    if (urManager.isConnected) {
-      final offsetCmd = URCommandBuilder.buildCommand([0x08, 0x05, 0x00]);
-      urManager.sendHex(offsetCmd);
-      // 事件驅動等待 58-byte 回應（收到任一組 offset 即視為已到達）
-      for (int poll = 0; poll < 8; poll++) {
-        await Future.delayed(const Duration(milliseconds: 50));
-        if (dataStorage.getStm32Offset(0) != null) break;
-      }
-    }
+    // 早點讀，讓 Idle/Running 表格的 offset 欄在檢測過程中即可顯示（含重試）
+    await _readStm32OffsetWithRetry();
 
     if (isAutoDetectionCancelled) return false;
 
@@ -961,6 +969,10 @@ mixin AutoDetectionController<T extends StatefulWidget> on State<T>, DebugHistor
   Future<bool> _autoDetectionStep5SensorTest() async {
     final thresholdService = ThresholdSettingsService();
     final int maxRetryPerID = thresholdService.maxRetryPerID;
+
+    // 進入感應偵測前，確保 offset 已收到（step2 若漏掉這裡會補送重試）
+    await _readStm32OffsetWithRetry();
+    if (isAutoDetectionCancelled) return false;
 
     // 事件驅動等待的輪詢間隔
     const int pollIntervalMs = 50;

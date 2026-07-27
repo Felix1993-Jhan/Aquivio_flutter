@@ -2677,9 +2677,17 @@ class _AutoDetectionPageState extends State<AutoDetectionPage> {
         DeviceType.arduino, stateType, id, arduinoValue);
     }
 
+    // STM32 運轉：兩段判定（深藍=240±35 / 淺藍=170±35 / 紅=不良），所有腳位通用
+    // STM32 無動作(Idle)：維持原本範圍驗證
+    Stm32RunResult? stm32RunTier;
     if (stm32Value != null) {
-      stm32InRange = thresholdService.validateHardwareValue(
-        DeviceType.stm32, stateType, id, stm32Value);
+      if (stateType == StateType.running) {
+        stm32RunTier = thresholdService.evaluateStm32Running(stm32Value);
+        stm32InRange = stm32RunTier != Stm32RunResult.fail;
+      } else {
+        stm32InRange = thresholdService.validateHardwareValue(
+          DeviceType.stm32, stateType, id, stm32Value);
+      }
     }
 
     // 只要有一個設備的數值超出範圍就是 Error
@@ -2699,9 +2707,64 @@ class _AutoDetectionPageState extends State<AutoDetectionPage> {
       isTemperature: false,
       arduinoInRange: arduinoInRange,
       stm32InRange: stm32InRange,
+      stm32RunTier: stm32RunTier,
       minHeight: _hardwareRowHeight,  // 使用統一的行高
       showOffset: true,  // 硬體區顯示 STM32 offset 欄
       stm32Offset: widget.dataStorage.getStm32Offset(id),
+    );
+  }
+
+  /// 建構 STM32 數值格
+  /// 運轉兩段判定：pass1=深藍(首次)、pass2=淺藍+圓標(二次)、fail=紅；
+  /// tier 為 null 時（Idle 等）沿用原本的 inRange 藍/紅
+  Widget _buildStm32Cell(int? value, bool inRange, Stm32RunResult? tier) {
+    if (value == null) {
+      return const Text('--',
+          textAlign: TextAlign.center,
+          style: TextStyle(fontSize: 10, color: Colors.grey));
+    }
+    Color color = inRange ? SkyBlueColors.dark : Colors.red;
+    bool bold = !inRange;
+    bool showMark = false;
+    if (tier == Stm32RunResult.pass1) {
+      color = SkyBlueColors.dark;
+      bold = false;
+    } else if (tier == Stm32RunResult.pass2) {
+      color = const Color(0xFF4FA8E0); // 淺藍
+      bold = false;
+      showMark = true;
+    } else if (tier == Stm32RunResult.fail) {
+      color = Colors.red;
+      bold = true;
+    }
+
+    final valueText = Text(
+      '$value',
+      textAlign: TextAlign.center,
+      style: TextStyle(
+        fontSize: 10,
+        fontWeight: bold ? FontWeight.bold : FontWeight.normal,
+        color: color,
+      ),
+      overflow: TextOverflow.ellipsis,
+    );
+    if (!showMark) return valueText;
+    // 二次通過：淺藍值 + 後方小圓標，方便一眼區分低群
+    return Row(
+      mainAxisSize: MainAxisSize.max,
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        Flexible(child: valueText),
+        const SizedBox(width: 3),
+        Container(
+          width: 7,
+          height: 7,
+          decoration: const BoxDecoration(
+            shape: BoxShape.circle,
+            color: Color(0xFF4FA8E0),
+          ),
+        ),
+      ],
     );
   }
 
@@ -2836,6 +2899,7 @@ class _AutoDetectionPageState extends State<AutoDetectionPage> {
     double? minHeight,  // 可選的最小高度（用於硬體區域統一高度）
     bool showOffset = false,  // 是否顯示 STM32 offset 欄（硬體 Idle/Running 區）
     int? stm32Offset,  // STM32 開機自校準 offset 值
+    Stm32RunResult? stm32RunTier,  // STM32 運轉兩段判定（非 null 時 STM32 欄以此上色）
   }) {
     // 判斷是否有數據可比較
     final hasData = arduinoValue != null && stm32Value != null;
@@ -2935,22 +2999,10 @@ class _AutoDetectionPageState extends State<AutoDetectionPage> {
               overflow: TextOverflow.ellipsis,
             ),
           ),
-          // STM32 欄
+          // STM32 欄（運轉時走兩段判定：深藍/淺藍+圓標/紅）
           Expanded(
             flex: 2,
-            child: Text(
-              stm32Value != null ? '$stm32Value' : '--',
-              style: TextStyle(
-                fontSize: 10,
-                fontWeight: (stm32Value != null && !stm32InRange)
-                    ? FontWeight.bold : FontWeight.normal,
-                color: stm32Value != null
-                    ? (stm32InRange ? SkyBlueColors.dark : Colors.red)
-                    : Colors.grey,
-              ),
-              textAlign: TextAlign.center,
-              overflow: TextOverflow.ellipsis,
-            ),
+            child: _buildStm32Cell(stm32Value, stm32InRange, stm32RunTier),
           ),
           // 差值欄（已隱藏 - 目前未使用）
           // Expanded(

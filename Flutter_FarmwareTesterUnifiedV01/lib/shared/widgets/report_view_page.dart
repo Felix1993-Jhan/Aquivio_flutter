@@ -79,6 +79,9 @@ class _ReportViewPageState extends State<ReportViewPage> {
   static const Color _sensorLow = Color(0xFF2E75B6);
   static const Color _sectionBg = Color(0xFF404040);
   static const Color _headerBg = Color(0xFFD9D9D9);
+  // STM32 運轉兩段：深藍=首次通過、淺藍(_hwLow)=二次通過、紅=不良
+  static const Color _tier1 = Color(0xFF6FA8DC);
+  static const Color _fail = Color(0xFFE06666);
 
   // 尺寸（固定行高以確保四區對齊）
   static const double _labelW = 150;
@@ -139,11 +142,21 @@ class _ReportViewPageState extends State<ReportViewPage> {
     if (device == ReportDevice.offset || widget.statusResolver == null) {
       return null;
     }
-    final s = widget.statusResolver!(section, device, id, value);
-    if (s == CellStatus.normal) return null;
     final sensor = section == ReportSection.sensor;
-    if (s == CellStatus.high) return sensor ? _sensorHigh : _hwHigh;
-    return sensor ? _sensorLow : _hwLow;
+    switch (widget.statusResolver!(section, device, id, value)) {
+      case CellStatus.normal:
+        return null;
+      case CellStatus.tier1Pass:
+        return _tier1; // 深藍：首次通過
+      case CellStatus.tier2Pass:
+        return _hwLow; // 淺藍：二次通過
+      case CellStatus.fail:
+        return _fail; // 紅：不良
+      case CellStatus.high:
+        return sensor ? _sensorHigh : _hwHigh;
+      case CellStatus.low:
+        return sensor ? _sensorLow : _hwLow;
+    }
   }
 
   /// 建立所有列的描述（左欄與資料區共用）

@@ -20,7 +20,9 @@ enum ReportSection { idle, running, sensor }
 enum ReportDevice { offset, arduino, stm32 }
 
 /// 儲存格狀態（決定上色）
-enum CellStatus { normal, high, low }
+/// - normal / high / low：一般範圍判定（低=藍、高=紅）
+/// - tier1Pass / tier2Pass / fail：STM32 運轉兩段判定（深藍 / 淺藍 / 紅）
+enum CellStatus { normal, high, low, tier1Pass, tier2Pass, fail }
 
 /// 儲存格狀態判定器：(區塊, 欄位, ID, 值) → 正常 / 偏高 / 偏低
 typedef CellStatusResolver = CellStatus Function(
@@ -46,6 +48,9 @@ class ReportExcelExporter {
   static const String _sensorLow = '#2E75B6'; // 感應偏低：深藍
   static const String _headerBg = '#D9D9D9'; // 標題列：灰
   static const String _sectionBg = '#404040'; // 區塊分隔：深灰
+  // STM32 運轉兩段：深藍=首次通過、淺藍(_hwLow)=二次通過、紅=不良
+  static const String _tier1 = '#6FA8DC';
+  static const String _fail = '#E06666';
 
   /// 子欄清單（依模式決定）
   List<ReportDevice> get _subCols {
@@ -306,11 +311,21 @@ class ReportExcelExporter {
   String? _bgFor(ReportSection section, ReportDevice device, int id, int value) {
     if (device == ReportDevice.offset) return null;
     if (statusResolver == null) return null;
-    final status = statusResolver!(section, device, id, value);
-    if (status == CellStatus.normal) return null;
     final isSensor = section == ReportSection.sensor;
-    if (status == CellStatus.high) return isSensor ? _sensorHigh : _hwHigh;
-    return isSensor ? _sensorLow : _hwLow;
+    switch (statusResolver!(section, device, id, value)) {
+      case CellStatus.normal:
+        return null;
+      case CellStatus.tier1Pass:
+        return _tier1; // 深藍：首次通過
+      case CellStatus.tier2Pass:
+        return _hwLow; // 淺藍：二次通過
+      case CellStatus.fail:
+        return _fail; // 紅：不良
+      case CellStatus.high:
+        return isSensor ? _sensorHigh : _hwHigh;
+      case CellStatus.low:
+        return isSensor ? _sensorLow : _hwLow;
+    }
   }
 
   TestSnapshot? _roundOf(BoardRecord board, int roundIndex) =>

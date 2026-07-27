@@ -1952,9 +1952,21 @@ class _MainNavigationPageState extends State<MainNavigationPage>
   CellStatus _resolveReportCellStatus(
       ReportSection section, ReportDevice device, int id, int value) {
     if (device == ReportDevice.offset) return CellStatus.normal;
+    final t = ThresholdSettingsService();
+    // STM32 運轉：兩段判定（深藍=高群 240±35 / 淺藍=低群 170±35 / 紅=不良），
+    // 所有硬體腳位通用（SR540 混批 Vf）
+    if (device == ReportDevice.stm32 && section == ReportSection.running) {
+      switch (t.evaluateStm32Running(value)) {
+        case Stm32RunResult.pass1:
+          return CellStatus.tier1Pass;
+        case Stm32RunResult.pass2:
+          return CellStatus.tier2Pass;
+        case Stm32RunResult.fail:
+          return CellStatus.fail;
+      }
+    }
     final dev =
         device == ReportDevice.arduino ? DeviceType.arduino : DeviceType.stm32;
-    final t = ThresholdSettingsService();
     final ThresholdRange range = section == ReportSection.sensor
         ? t.getSensorThreshold(dev, id)
         : t.getHardwareThreshold(
