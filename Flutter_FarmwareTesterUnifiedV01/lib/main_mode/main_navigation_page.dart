@@ -1956,7 +1956,7 @@ class _MainNavigationPageState extends State<MainNavigationPage>
     // STM32 運轉：兩段判定（深藍=高群 240±35 / 淺藍=低群 170±35 / 紅=不良），
     // 所有硬體腳位通用（SR540 混批 Vf）
     if (device == ReportDevice.stm32 && section == ReportSection.running) {
-      switch (t.evaluateStm32Running(value)) {
+      switch (t.evaluateStm32Running(id, value)) {
         case Stm32RunResult.pass1:
           return CellStatus.tier1Pass;
         case Stm32RunResult.pass2:

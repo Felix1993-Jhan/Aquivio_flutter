@@ -2682,7 +2682,7 @@ class _AutoDetectionPageState extends State<AutoDetectionPage> {
     Stm32RunResult? stm32RunTier;
     if (stm32Value != null) {
       if (stateType == StateType.running) {
-        stm32RunTier = thresholdService.evaluateStm32Running(stm32Value);
+        stm32RunTier = thresholdService.evaluateStm32Running(id, stm32Value);
         stm32InRange = stm32RunTier != Stm32RunResult.fail;
       } else {
         stm32InRange = thresholdService.validateHardwareValue(

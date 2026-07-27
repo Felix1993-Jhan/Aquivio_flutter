@@ -127,30 +127,29 @@ class ThresholdSettingsService with ThresholdStorageMixin {
     17: ThresholdRange(min: 0, max: 55),
   };
 
-  /// ID2 STM32 Running ADC 偏移量（硬體特性，多片板測試確認 ID2 讀值偏高約 45）
-  static const int stm32RunningId2Offset = 45;
 
   /// STM32 Running 預設範圍 (硬體 ID 0-17)
   /// 12V 經 10:4.7 分壓再 1:1 分壓，STM32 ADC 已做對地校正及 3.0V→2.5V 基準轉換
+  // STM32 運轉第一段範圍（第二段 = 此範圍整段減 stm32RunSecondGroupOffset）
   static const Map<int, ThresholdRange> _defaultStm32RunningHardware = {
-    0: ThresholdRange(min: 265, max: 290),
-    1: ThresholdRange(min: 265, max: 290),
-    2: ThresholdRange(min: 310, max: 335), // ID2 偏移 +45
-    3: ThresholdRange(min: 265, max: 290),
-    4: ThresholdRange(min: 265, max: 290),
-    5: ThresholdRange(min: 265, max: 290),
-    6: ThresholdRange(min: 265, max: 290),
-    7: ThresholdRange(min: 265, max: 290),
-    8: ThresholdRange(min: 265, max: 290),
-    9: ThresholdRange(min: 265, max: 290),
-    10: ThresholdRange(min: 265, max: 290),
-    11: ThresholdRange(min: 265, max: 290),
-    12: ThresholdRange(min: 265, max: 290),
-    13: ThresholdRange(min: 265, max: 290),
-    14: ThresholdRange(min: 265, max: 290),
-    15: ThresholdRange(min: 265, max: 290),
-    16: ThresholdRange(min: 265, max: 290),
-    17: ThresholdRange(min: 265, max: 290),
+    0: ThresholdRange(min: 215, max: 270),
+    1: ThresholdRange(min: 215, max: 270),
+    2: ThresholdRange(min: 215, max: 270),
+    3: ThresholdRange(min: 215, max: 270),
+    4: ThresholdRange(min: 215, max: 270),
+    5: ThresholdRange(min: 215, max: 270),
+    6: ThresholdRange(min: 215, max: 270),
+    7: ThresholdRange(min: 215, max: 270),
+    8: ThresholdRange(min: 215, max: 270),
+    9: ThresholdRange(min: 215, max: 270),
+    10: ThresholdRange(min: 215, max: 270),
+    11: ThresholdRange(min: 215, max: 270),
+    12: ThresholdRange(min: 215, max: 270),
+    13: ThresholdRange(min: 215, max: 270),
+    14: ThresholdRange(min: 215, max: 270),
+    15: ThresholdRange(min: 215, max: 270),
+    16: ThresholdRange(min: 215, max: 270),
+    17: ThresholdRange(min: 215, max: 270),
   };
 
   /// Arduino 感測器預設範圍 (ID 18-21)
@@ -411,19 +410,22 @@ class ThresholdSettingsService with ThresholdStorageMixin {
 
   // ==================== 取得設定值 ====================
 
-  // ==================== STM32 運轉兩段判定（所有腳位通用）====================
-  // 因 SR540 蕭特基混批，運轉 ADC 值分兩群：高群 ~240、低群 ~170。
-  // 同一筆值先用高群範圍判，不過再用低群範圍判，兩群在 205 相接。
-  static const int stm32RunTier1Center = 240; // 高群中心
-  static const int stm32RunTier2Center = 170; // 低群中心
-  static const int stm32RunTolerance = 35;
+  // ==================== STM32 運轉兩段判定 ====================
+  // 第一段：直接用既有的硬體閾值範圍 getHardwareThreshold（設定頁可編輯、
+  //         恢復預設也走它）——顯示的即為實際判定用的,不再分兩套。
+  // 第二段：第一段沒過時,把整段範圍往下扣 offset 再判一次（SR540 混批低群 Vf）。
+  // 這個 offset 是唯一的新變數,未來要開放設定只需改成可存的閾值即可。
+  static const int stm32RunSecondGroupOffset = 55;
 
-  /// STM32 運轉值兩段判定（通用，不分腳位）
-  Stm32RunResult evaluateStm32Running(int value) {
-    if ((value - stm32RunTier1Center).abs() <= stm32RunTolerance) {
-      return Stm32RunResult.pass1;
-    }
-    if ((value - stm32RunTier2Center).abs() <= stm32RunTolerance) {
+  /// STM32 運轉值兩段判定
+  /// - pass1：落在第一段範圍（深藍）
+  /// - pass2：第一段沒過,但落在「第一段整段減 offset」的第二段範圍（淺藍）
+  /// - fail：兩段都不過（紅）
+  Stm32RunResult evaluateStm32Running(int id, int value) {
+    final r = getHardwareThreshold(DeviceType.stm32, StateType.running, id);
+    if (value >= r.min && value <= r.max) return Stm32RunResult.pass1;
+    if (value >= r.min - stm32RunSecondGroupOffset &&
+        value <= r.max - stm32RunSecondGroupOffset) {
       return Stm32RunResult.pass2;
     }
     return Stm32RunResult.fail;
@@ -562,19 +564,10 @@ class ThresholdSettingsService with ThresholdStorageMixin {
   }
 
   /// 批次設定硬體閾值（同一設備/狀態的所有 ID 使用相同範圍）
-  /// STM32 Running 時 ID2 自動加上偏移量（硬體特性補償）
   Future<void> setAllHardwareThresholds(DeviceType device, StateType state, ThresholdRange range) async {
     final map = <int, ThresholdRange>{};
-    final bool applyId2Offset = device == DeviceType.stm32 && state == StateType.running;
     for (int id = 0; id < 18; id++) {
-      if (applyId2Offset && id == 2) {
-        map[id] = ThresholdRange(
-          min: range.min + stm32RunningId2Offset,
-          max: range.max + stm32RunningId2Offset,
-        );
-      } else {
-        map[id] = range;
-      }
+      map[id] = range;
     }
 
     if (device == DeviceType.arduino) {
@@ -838,7 +831,7 @@ class ThresholdSettingsService with ThresholdStorageMixin {
   /// 讓表格、結果清單、各診斷全部用同一套判定，不會表格過、結果卻 FAIL
   bool validateHardwareValue(DeviceType device, StateType state, int id, int value) {
     if (device == DeviceType.stm32 && state == StateType.running) {
-      return evaluateStm32Running(value) != Stm32RunResult.fail;
+      return evaluateStm32Running(id, value) != Stm32RunResult.fail;
     }
     final range = getHardwareThreshold(device, state, id);
     return range.isInRange(value);

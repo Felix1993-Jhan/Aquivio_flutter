@@ -591,11 +591,6 @@ class _SettingsPageState extends State<SettingsPage> {
   /// 顯示閾值編輯對話框
   void _showThresholdEditDialog(DeviceType device, StateType state, String title, Color color) {
     final thresholds = _thresholdService.getAllHardwareThresholds(device, state);
-    // STM32 Running 時，ID2 有硬體偏移補償
-    final Map<int, int>? idOffsets =
-        (device == DeviceType.stm32 && state == StateType.running)
-            ? {2: ThresholdSettingsService.stm32RunningId2Offset}
-            : null;
 
     showDialog(
       context: context,
@@ -603,7 +598,7 @@ class _SettingsPageState extends State<SettingsPage> {
         title: title,
         color: color,
         thresholds: thresholds,
-        idOffsets: idOffsets,
+        idOffsets: null,
         onSave: (newThresholds) async {
           for (final entry in newThresholds.entries) {
             await _thresholdService.setHardwareThreshold(device, state, entry.key, entry.value);
