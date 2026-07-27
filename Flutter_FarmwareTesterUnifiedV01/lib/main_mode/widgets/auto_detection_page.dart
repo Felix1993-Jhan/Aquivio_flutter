@@ -14,6 +14,7 @@
 
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show FilteringTextInputFormatter;
 import 'package:flutter_firmware_tester_unified/shared/services/data_storage_service.dart';
 import 'package:flutter_firmware_tester_unified/shared/services/localization_service.dart';
 import '../services/threshold_settings_service.dart';
@@ -205,6 +206,32 @@ class AutoDetectionPage extends StatefulWidget {
   /// 自動檢測開始回調
   final VoidCallback? onStartAutoDetection;
 
+  /// 手動讀取 STM32 offset 回調（命令 0x08 sub 0x05）
+  final VoidCallback? onReadStm32Offsets;
+
+  /// MCU 軟體重置回調（命令族 0xB0：BEGIN → Reset）
+  final VoidCallback? onResetStm32Mcu;
+
+  // ==================== 檢測報告：編號 ====================
+
+  /// 編號前綴（目前值）
+  final String reportPrefix;
+
+  /// 編號後綴數字（目前值）
+  final int reportSuffix;
+
+  /// 前綴變更回調
+  final ValueChanged<String>? onReportPrefixChanged;
+
+  /// 後綴變更回調（手動填入）
+  final ValueChanged<int>? onReportSuffixChanged;
+
+  /// 下一片（編號 +1）回調
+  final VoidCallback? onReportNextBoard;
+
+  /// 開啟 App 內報告表格頁回調
+  final VoidCallback? onReportShowReport;
+
   /// 是否正在自動檢測
   final bool isAutoDetecting;
 
@@ -318,6 +345,14 @@ class AutoDetectionPage extends StatefulWidget {
     required this.onStm32Disconnect,
     required this.onRefreshPorts,
     this.onStartAutoDetection,
+    this.onReadStm32Offsets,
+    this.onResetStm32Mcu,
+    this.reportPrefix = '',
+    this.reportSuffix = 1,
+    this.onReportPrefixChanged,
+    this.onReportSuffixChanged,
+    this.onReportNextBoard,
+    this.onReportShowReport,
     this.isAutoDetecting = false,
     this.autoDetectionStatus,
     this.autoDetectionProgress = 0.0,
@@ -372,11 +407,24 @@ class _AutoDetectionPageState extends State<AutoDetectionPage> {
   // 是否顯示相鄰腳位短路詳細資料
   bool _showAdjacentDetails = false;
 
+  // 編號輸入 controller（前綴 / 後綴數字，皆可手動填）
+  late final TextEditingController _prefixCtrl;
+  late final TextEditingController _suffixCtrl;
+
+  @override
+  void initState() {
+    super.initState();
+    _prefixCtrl = TextEditingController(text: widget.reportPrefix);
+    _suffixCtrl = TextEditingController(text: widget.reportSuffix.toString());
+  }
+
   @override
   void dispose() {
     _idleScrollController.dispose();
     _runningScrollController.dispose();
     _sensorScrollController.dispose();
+    _prefixCtrl.dispose();
+    _suffixCtrl.dispose();
     super.dispose();
   }
 
@@ -388,6 +436,15 @@ class _AutoDetectionPageState extends State<AutoDetectionPage> {
         widget.currentReadingSection != oldWidget.currentReadingSection ||
         _listChanged(widget.secondaryReadingIds, oldWidget.secondaryReadingIds)) {
       _scrollToCurrentItem();
+    }
+    // 編號被外部更新（例如按「下一片」+1）時，同步輸入框文字
+    if (widget.reportSuffix != oldWidget.reportSuffix &&
+        _suffixCtrl.text != widget.reportSuffix.toString()) {
+      _suffixCtrl.text = widget.reportSuffix.toString();
+    }
+    if (widget.reportPrefix != oldWidget.reportPrefix &&
+        _prefixCtrl.text != widget.reportPrefix) {
+      _prefixCtrl.text = widget.reportPrefix;
     }
   }
 
@@ -494,6 +551,8 @@ class _AutoDetectionPageState extends State<AutoDetectionPage> {
                         _buildStLinkProgramBar(),
                         // 燒入進度指示器（僅在燒入中時顯示）
                         if (widget.isProgramming) _buildProgramProgress(),
+                        // 編號帶：前綴 + 編號（可填）＋ 下一片 ＋ 可以看報告
+                        _buildSerialBar(),
                         // COM 選擇和連接控制區 + 自動檢測按鈕
                         _buildConnectionControlBar(),
                         // 自動檢測進度指示器（僅在進行中時顯示）
@@ -548,6 +607,8 @@ class _AutoDetectionPageState extends State<AutoDetectionPage> {
                             ),
                           ),
                         ),
+                        // 電阻分壓 ADC（虛擬通道 0xF0）：單行 Card，位於感應偵測上方
+                        _buildResistanceCard(),
                         // 下方：感應偵測區 (ID 18-23)
                         // flex 增加到 2 以容納 6 行感測器資料
                         // 左右與程式邊界相隔 80 像素
@@ -568,6 +629,24 @@ class _AutoDetectionPageState extends State<AutoDetectionPage> {
                             ),
                           ),
                         ),
+                        // 感應偵測下方：MCU 軟體重置按鈕（命令族 0xB0，韌體 0.0.0.7+）
+                        if (widget.onResetStm32Mcu != null)
+                          Padding(
+                            padding: const EdgeInsets.fromLTRB(80, 0, 80, 8),
+                            child: SizedBox(
+                              width: double.infinity,
+                              child: OutlinedButton.icon(
+                                onPressed: widget.isStm32Connected ? widget.onResetStm32Mcu : null,
+                                icon: const Icon(Icons.restart_alt, size: 18),
+                                label: Text(tr('stm32_mcu_reset')),
+                                style: OutlinedButton.styleFrom(
+                                  foregroundColor: const Color(0xFF6A1B9A),
+                                  side: const BorderSide(color: Color(0xFF6A1B9A)),
+                                  padding: const EdgeInsets.symmetric(vertical: 8),
+                                ),
+                              ),
+                            ),
+                          ),
                       ],
                     ),
                     // 右下角浮動小球按鈕 - 查看檢測結果
@@ -590,6 +669,20 @@ class _AutoDetectionPageState extends State<AutoDetectionPage> {
                         right: 16,
                         bottom: 136,
                         child: _buildAutoStartButton(),
+                      ),
+                    // 手動讀取 STM32 offset 按鈕（在開始按鈕上方）
+                    if (widget.onReadStm32Offsets != null)
+                      Positioned(
+                        right: 16,
+                        bottom: 196,
+                        child: FloatingActionButton(
+                          heroTag: 'readStm32OffsetBtn',
+                          mini: true,
+                          backgroundColor: const Color(0xFF6A1B9A),
+                          onPressed: widget.onReadStm32Offsets,
+                          tooltip: tr('column_stm32_offset'),
+                          child: const Icon(Icons.straighten, color: Colors.white, size: 20),
+                        ),
                       ),
                     // 調試訊息顯示區（慢速模式下顯示）
                     if (widget.isSlowDebugMode && widget.debugMessage != null && widget.debugMessage!.isNotEmpty)
@@ -1920,7 +2013,7 @@ class _AutoDetectionPageState extends State<AutoDetectionPage> {
             ),
           ),
           // 表頭（根據模式選擇不同表頭）
-          isRunningWithNewMode ? _buildRunningTableHeaderWithAdjacent() : _buildTableHeader(),
+          isRunningWithNewMode ? _buildRunningTableHeaderWithAdjacent() : _buildTableHeader(showOffset: true),
           // 數據列表
           Expanded(
             child: SingleChildScrollView(
@@ -1935,6 +2028,146 @@ class _AutoDetectionPageState extends State<AutoDetectionPage> {
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  /// 編號帶：前綴 + 編號（皆可手動填）＋ 下一片 ＋ 可以看報告
+  Widget _buildSerialBar() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 6, 12, 2),
+      child: Row(
+        children: [
+          // 編號卡片
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: Colors.blueGrey.shade300, width: 1.5),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text('前綴 ',
+                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                SizedBox(
+                  width: 130,
+                  child: TextField(
+                    controller: _prefixCtrl,
+                    style: const TextStyle(fontSize: 13),
+                    decoration: const InputDecoration(
+                      isDense: true,
+                      hintText: '前綴',
+                      border: OutlineInputBorder(),
+                      contentPadding:
+                          EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                    ),
+                    onChanged: (v) => widget.onReportPrefixChanged?.call(v),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                const Text('編號 ',
+                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                SizedBox(
+                  width: 70,
+                  child: TextField(
+                    controller: _suffixCtrl,
+                    keyboardType: TextInputType.number,
+                    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                    style: const TextStyle(fontSize: 13),
+                    decoration: const InputDecoration(
+                      isDense: true,
+                      hintText: '000',
+                      border: OutlineInputBorder(),
+                      contentPadding:
+                          EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                    ),
+                    onChanged: (v) {
+                      final n = int.tryParse(v);
+                      if (n != null) widget.onReportSuffixChanged?.call(n);
+                    },
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const Spacer(),
+          // 下一片
+          if (widget.onReportNextBoard != null)
+            ElevatedButton.icon(
+              onPressed: widget.onReportNextBoard,
+              icon: const Icon(Icons.skip_next, size: 18),
+              label: const Text('下一片'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF00695C),
+                foregroundColor: Colors.white,
+              ),
+            ),
+          const SizedBox(width: 8),
+          // 可以看報告
+          if (widget.onReportShowReport != null)
+            OutlinedButton.icon(
+              onPressed: widget.onReportShowReport,
+              icon: const Icon(Icons.table_chart, size: 18),
+              label: const Text('可以看報告'),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: const Color(0xFF2E7D32),
+                side: const BorderSide(color: Color(0xFF2E7D32)),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  /// 建構電阻分壓 ADC 單行 Card（虛擬通道 0xF0=240）
+  /// 左：電阻版本（目前沒有定）；右：數值（回傳的分壓 ADC）
+  Widget _buildResistanceCard() {
+    const int resistanceId = 0xF0;
+    final data = widget.dataStorage.getStm32LatestRunningData(resistanceId) ??
+        widget.dataStorage.getStm32LatestIdleData(resistanceId);
+    final valueText = data != null ? '${data.value}' : '--';
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(80, 6, 80, 0),
+      child: Card(
+        elevation: 4,
+        shadowColor: Colors.brown.shade300,
+        margin: EdgeInsets.zero,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
+          side: BorderSide(color: Colors.brown.shade300, width: 2),
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+          child: Row(
+            children: [
+              const Text('🔩', style: TextStyle(fontSize: 16)),
+              const SizedBox(width: 8),
+              // 左：電阻版本：目前沒有定
+              Text(
+                '${tr('resistance_title')}：${tr('resistance_undefined')}',
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.brown.shade700,
+                ),
+              ),
+              const Spacer(),
+              // 右：數值：<ADC>
+              Text(
+                '${tr('resistance_value')}：$valueText',
+                style: const TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.bold,
+                  color: Color(0xFF1976D2),
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -1983,7 +2216,8 @@ class _AutoDetectionPageState extends State<AutoDetectionPage> {
   }
 
   /// 建構表頭
-  Widget _buildTableHeader() {
+  /// [showOffset] 為 true 時（硬體 Idle/Running 區）在名稱後加一欄 STM32 offset
+  Widget _buildTableHeader({bool showOffset = false}) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
       decoration: BoxDecoration(
@@ -2003,6 +2237,21 @@ class _AutoDetectionPageState extends State<AutoDetectionPage> {
               overflow: TextOverflow.ellipsis,
             ),
           ),
+          // STM32 offset 欄（固定小寬度，剛好夠用）
+          if (showOffset)
+            SizedBox(
+              width: 44,
+              child: Text(
+                tr('column_stm32_offset'),
+                style: const TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 10,
+                  color: Color(0xFF6A1B9A), // 紫色，與 STM32 藍色區隔
+                ),
+                textAlign: TextAlign.center,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
           // Arduino 欄
           Expanded(
             flex: 2,
@@ -2451,6 +2700,8 @@ class _AutoDetectionPageState extends State<AutoDetectionPage> {
       arduinoInRange: arduinoInRange,
       stm32InRange: stm32InRange,
       minHeight: _hardwareRowHeight,  // 使用統一的行高
+      showOffset: true,  // 硬體區顯示 STM32 offset 欄
+      stm32Offset: widget.dataStorage.getStm32Offset(id),
     );
   }
 
@@ -2583,6 +2834,8 @@ class _AutoDetectionPageState extends State<AutoDetectionPage> {
     bool arduinoInRange = true,  // Arduino 數值是否在範圍內
     bool stm32InRange = true,    // STM32 數值是否在範圍內
     double? minHeight,  // 可選的最小高度（用於硬體區域統一高度）
+    bool showOffset = false,  // 是否顯示 STM32 offset 欄（硬體 Idle/Running 區）
+    int? stm32Offset,  // STM32 開機自校準 offset 值
   }) {
     // 判斷是否有數據可比較
     final hasData = arduinoValue != null && stm32Value != null;
@@ -2645,6 +2898,21 @@ class _AutoDetectionPageState extends State<AutoDetectionPage> {
               ),
             ),
           ),
+          // STM32 offset 欄（固定小寬度，剛好夠用）
+          if (showOffset)
+            SizedBox(
+              width: 44,
+              child: Text(
+                stm32Offset != null ? '$stm32Offset' : '--',
+                style: TextStyle(
+                  fontSize: 10,
+                  fontWeight: FontWeight.bold,
+                  color: stm32Offset != null ? const Color(0xFF6A1B9A) : Colors.grey,
+                ),
+                textAlign: TextAlign.center,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
           // Arduino 欄
           Expanded(
             flex: 2,

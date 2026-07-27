@@ -15,6 +15,9 @@ import 'package:flutter_firmware_tester_unified/bodydoor_mode/bodydoor_navigatio
 import 'package:flutter_firmware_tester_unified/mode_selection_page.dart';
 import 'package:flutter_firmware_tester_unified/shared/services/serial_port_manager.dart';
 import 'package:flutter_firmware_tester_unified/shared/services/localization_service.dart';
+import 'package:flutter_firmware_tester_unified/shared/services/test_report_service.dart';
+import 'package:flutter_firmware_tester_unified/shared/services/report_excel_exporter.dart';
+import 'package:flutter_firmware_tester_unified/shared/widgets/report_view_page.dart';
 import 'services/threshold_settings_service.dart';
 import 'services/stlink_programmer_service.dart';
 import 'services/cli_checker_service.dart';
@@ -57,6 +60,15 @@ class _MainNavigationPageState extends State<MainNavigationPage>
   // ==================== 數據儲存服務 ====================
 
   final DataStorageService _dataStorage = DataStorageService();
+
+  // ==================== 檢測報告 ====================
+
+  /// 檢測報告累積服務（Main 模式設定；sessionStart = 進入本模式的時間，
+  /// 程式重啟就是新的一份報告檔）
+  late final TestReportService _reportService;
+
+  /// Excel 匯出器
+  late final ReportExcelExporter _reportExporter;
 
   // ==================== 狀態變數 ====================
 
@@ -432,6 +444,17 @@ class _MainNavigationPageState extends State<MainNavigationPage>
     // 初始化閾值設定服務
     _initThresholdService();
 
+    // 初始化檢測報告服務（Main 模式；sessionStart = 進入本模式時間）
+    final reportConfig = ReportConfig.main();
+    _reportService = TestReportService(
+      config: reportConfig,
+      sessionStart: DateTime.now(),
+    );
+    _reportExporter = ReportExcelExporter(
+      config: reportConfig,
+      statusResolver: _resolveReportCellStatus,
+    );
+
     // 設置 Arduino 數據接收回調
     _arduinoManager.onDataReceived = (int id, int value) {
       _dataStorage.saveArduinoData(id, value);
@@ -440,6 +463,11 @@ class _MainNavigationPageState extends State<MainNavigationPage>
     // 設置 STM32 數據接收回調
     _urManager.onDataReceived = (int id, int value) {
       _dataStorage.saveStm32Data(id, value);
+    };
+
+    // 設置 STM32 offset 讀取回調（命令 0x08 sub 0x05）
+    _urManager.onOffsetReceived = (int id, int offset) {
+      _dataStorage.saveStm32Offset(id, offset);
     };
 
     // 設置 STM32 韌體版本回調
@@ -1869,9 +1897,135 @@ class _MainNavigationPageState extends State<MainNavigationPage>
   }
 
   /// 建構自動檢測流程頁面
+  /// 送出讀取 STM32 offset 指令（命令 0x08 sub 0x05 READ OFFSET）
+  /// 回傳的 26 組 offset 由 onOffsetReceived 回調存入 DataStorageService
+  void readStm32Offsets() {
+    if (!_urManager.isConnected) {
+      showSnackBarMessage(tr('connect_stm32_first'));
+      return;
+    }
+    // payload = [0x08, 0x05, 0x00] → 40 71 30 08 05 00 12
+    sendUrCommand([0x08, 0x05, 0x00]);
+  }
+
+  /// MCU 軟體重置（命令族 0xB0，韌體 0.0.0.7+）
+  /// 流程：先送 BEGIN(0x00) 讓板子進入 bootloader，再送 Reset(0x05) 重啟
+  /// 單獨送 Reset 在 App 模式下不會有反應，故必須先 BEGIN
+  Future<void> resetStm32Mcu() async {
+    if (!_urManager.isConnected) {
+      showSnackBarMessage(tr('connect_stm32_first'));
+      return;
+    }
+
+    // 重置會重啟硬體，先跳確認對話框避免誤觸
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(tr('stm32_reset_confirm_title')),
+        content: Text(tr('stm32_reset_confirm_content')),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text(tr('cancel')),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text(tr('confirm')),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    if (!mounted || !_urManager.isConnected) return;
+
+    // 1. BEGIN：進入 bootloader（payload → 40 71 30 B0 00 00 00 00 6F）
+    sendUrCommand([0xB0, 0x00, 0x00, 0x00, 0x00]);
+    // 2. 等 MCU 進入 BL 後送 Reset（payload → 40 71 30 B0 05 00 00 00 6A）
+    await Future.delayed(const Duration(milliseconds: 400));
+    if (!mounted || !_urManager.isConnected) return;
+    sendUrCommand([0xB0, 0x05, 0x00, 0x00, 0x00]);
+    showSnackBarMessage(tr('stm32_reset_sent'));
+  }
+
+  /// 檢測報告儲存格上色判定（套用 ThresholdSettingsService 的 min/max）
+  /// 超過 max → 偏高（紅）、低於 min → 偏低（藍）；offset 欄不上色
+  CellStatus _resolveReportCellStatus(
+      ReportSection section, ReportDevice device, int id, int value) {
+    if (device == ReportDevice.offset) return CellStatus.normal;
+    final dev =
+        device == ReportDevice.arduino ? DeviceType.arduino : DeviceType.stm32;
+    final t = ThresholdSettingsService();
+    final ThresholdRange range = section == ReportSection.sensor
+        ? t.getSensorThreshold(dev, id)
+        : t.getHardwareThreshold(
+            dev,
+            section == ReportSection.idle ? StateType.idle : StateType.running,
+            id,
+          );
+    if (value > range.max) return CellStatus.high;
+    if (value < range.min) return CellStatus.low;
+    return CellStatus.normal;
+  }
+
+  /// 自動檢測「完整完成」回調（由 AutoDetectionController 於步驟 6 後呼叫）
+  /// → 擷取一份快照到當前編號，並自動存檔到桌面
+  @override
+  void onAutoDetectionCompleted() {
+    _reportService.captureCurrentResults(_dataStorage);
+    _autoSaveReport();
+  }
+
+  /// 匯出報告到桌面（自動存檔 / 手動匯出共用）
+  Future<void> _autoSaveReport() async {
+    if (!_reportService.hasData) return;
+    try {
+      final path = await _reportExporter.exportToDesktop(
+        _reportService.boards,
+        sessionStart: _reportService.sessionStart,
+      );
+      showSnackBarMessage('報告已存檔：$path');
+    } catch (e) {
+      showSnackBarMessage('報告存檔失敗：$e');
+    }
+  }
+
+  /// 下一片（編號 +1）→ 下次檢測視為新的一片（往右）
+  void reportNextBoard() {
+    setState(() => _reportService.nextBoard());
+    showSnackBarMessage('編號 → ${_reportService.currentSerial}（下一片）');
+  }
+
+  /// 編號前綴變更
+  void onReportPrefixChanged(String value) => _reportService.prefix = value;
+
+  /// 編號後綴變更（手動填入）
+  void onReportSuffixChanged(int value) => _reportService.suffix = value;
+
+  /// 開啟 App 內報告表格頁
+  void showReportPage() {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => ReportViewPage(
+          config: _reportService.config,
+          boards: _reportService.boards,
+          statusResolver: _resolveReportCellStatus,
+          onExport: _autoSaveReport,
+        ),
+      ),
+    );
+  }
+
   Widget _buildAutoDetectionPage() {
     return AutoDetectionPage(
       dataStorage: _dataStorage,
+      onReadStm32Offsets: readStm32Offsets,
+      onResetStm32Mcu: resetStm32Mcu,
+      reportPrefix: _reportService.prefix,
+      reportSuffix: _reportService.suffix,
+      onReportPrefixChanged: onReportPrefixChanged,
+      onReportSuffixChanged: onReportSuffixChanged,
+      onReportNextBoard: reportNextBoard,
+      onReportShowReport: showReportPage,
       availablePorts: _availablePorts,
       selectedArduinoPort: _selectedArduinoPort,
       selectedStm32Port: _selectedUrPort,

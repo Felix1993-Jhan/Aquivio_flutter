@@ -265,6 +265,22 @@ class DataStorageService {
     return (list != null && list.isNotEmpty) ? list.last : null;
   }
 
+  // ==================== STM32 Offset（開機自校準基準值）====================
+
+  /// STM32 開機自校準的 offset 值（key = ID 0~25）
+  /// 由 STM32 命令 0x08 sub 0x05 (READ OFFSET) 讀回，開機後固定不變
+  /// 只有 Group A（ID 0~17、25）有實際意義，其餘 group 韌體填 0
+  final Map<int, int> _stm32Offsets = {};
+
+  /// 儲存 STM32 offset 值
+  void saveStm32Offset(int id, int value) {
+    _stm32Offsets[id] = value;
+    _notifyUpdate();
+  }
+
+  /// 取得 STM32 指定 ID 的 offset 值（無資料回傳 null）
+  int? getStm32Offset(int id) => _stm32Offsets[id];
+
   // ==================== 通用方法 ====================
 
   /// 清除所有數據
@@ -273,6 +289,7 @@ class DataStorageService {
     _arduinoRunningData.clear();
     _stm32IdleData.clear();
     _stm32RunningData.clear();
+    _stm32Offsets.clear();
     _hardwareStates.clear();
     _isRunning.clear();
     _notifyUpdate();

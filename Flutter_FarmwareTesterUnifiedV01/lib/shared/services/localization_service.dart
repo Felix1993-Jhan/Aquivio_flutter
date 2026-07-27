@@ -117,6 +117,9 @@ class LocalizationService {
       'hardware_idle': '硬體無動作 (Idle)',
       'hardware_running': '硬體動作中 (Running)',
       'sensor_detection': '感應偵測',
+      'resistance_title': '電阻版本',
+      'resistance_undefined': '目前沒有定',
+      'resistance_value': '數值',
       'show_adjacent_details': '顯示相鄰短路詳情',
 
       // 資料儲存頁面
@@ -134,6 +137,11 @@ class LocalizationService {
       'column_name': '名稱',
       'column_arduino': 'Arduino',
       'column_stm32': 'STM32',
+      'column_stm32_offset': 'Offset',
+      'stm32_mcu_reset': 'MCU 軟體重置',
+      'stm32_reset_confirm_title': '確認重置 MCU',
+      'stm32_reset_confirm_content': '將讓 STM32 進入 bootloader 並執行軟體重置（會重跑開機自校準、offset 重新偵測）。確定要繼續嗎？',
+      'stm32_reset_sent': '已送出 MCU 重置指令（BEGIN → Reset）',
       'column_diff': '差值',
       'column_status': '狀態',
 
@@ -672,6 +680,9 @@ class LocalizationService {
       'hardware_idle': 'Hardware Idle',
       'hardware_running': 'Hardware Running',
       'sensor_detection': 'Sensor Detection',
+      'resistance_title': 'Resistance Ver.',
+      'resistance_undefined': 'Not defined',
+      'resistance_value': 'Value',
       'show_adjacent_details': 'Show Adjacent Short Details',
 
       // Data storage page
@@ -689,6 +700,11 @@ class LocalizationService {
       'column_name': 'Name',
       'column_arduino': 'Arduino',
       'column_stm32': 'STM32',
+      'column_stm32_offset': 'Offset',
+      'stm32_mcu_reset': 'MCU Reset',
+      'stm32_reset_confirm_title': 'Confirm MCU Reset',
+      'stm32_reset_confirm_content': 'This will make the STM32 enter bootloader and perform a software reset (boot-time self-calibration re-runs, offset re-detected). Continue?',
+      'stm32_reset_sent': 'MCU reset command sent (BEGIN → Reset)',
       'column_diff': 'Diff',
       'column_status': 'Status',
 

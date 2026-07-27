@@ -76,6 +76,16 @@ class SerialPortManager with ArduinoConnectionMixin {
   /// 參數: (int id, int value)
   void Function(int id, int value)? onDataReceived;
 
+  /// STM32 offset 讀取回調（命令 0x08 sub 0x05 READ OFFSET）
+  /// 一次回傳 26 組，id 範圍 0~25；只有 Group A（0~17、25）有意義
+  void Function(int id, int offset)? onOffsetReceived;
+
+  /// MCU Reset / Bootloader 命令族回應回調（命令 0xB0）
+  /// 參數: (int sub, int role, String version)
+  /// sub: 0x00=BEGIN echo, 0x01=INFO, 0x05=Reset echo
+  /// role: 0x01=Factory, 0x02=Active, 0x03=Bootloader；非 INFO 回應時為 -1
+  void Function(int sub, int role, String version)? onBootloaderResponse;
+
   /// GPIO 命令確認回調（STM32 專用）
   /// 當收到 0x01(開啟) 或 0x02(關閉) 命令的回應時觸發
   /// 參數: (int command, int bitMask) - command 為 0x01 或 0x02，bitMask 為受影響的腳位
@@ -706,6 +716,18 @@ class SerialPortManager with ArduinoConnectionMixin {
 
     final cmd = _hexReceiveBuffer[3];
 
+    // Error Report（0x08）READ OFFSET 回應：固定 58 bytes
+    // header(3) + cmd(1) + sub(1) + 26×uint16(52) + cs(1)；sub 必須為 0x05
+    if (cmd == 0x08) {
+      return _hexReceiveBuffer[4] == 0x05 ? 58 : 9;
+    }
+
+    // MCU Reset / Bootloader 命令族（0xB0，韌體 0.0.0.7+）
+    // INFO(sub=0x01) 回應為 11 bytes，其餘（BEGIN/Reset echo）為 9 bytes
+    if (cmd == 0xB0) {
+      return _hexReceiveBuffer[4] == 0x01 ? 11 : 9;
+    }
+
     // 非 0x05 命令（GPIO、ADC 等）：固定 9 bytes
     if (cmd != 0x05) return 9;
 
@@ -1002,6 +1024,47 @@ class SerialPortManager with ArduinoConnectionMixin {
       }
       return true;  // 是心跳回應，不需額外記錄日誌
     }
+    // Error Report - READ OFFSET 回應 (0x08 sub 0x05) — 固定 58 bytes
+    // 40 71 30 08 05 [off0 LE 2B] [off1 LE 2B] ... [off25 LE 2B] CS
+    // 每組為 VREFINT 校正後的 uint16（小端序），對應 ID 0~25
+    else if (command == 0x08 && data.length == 58 && data[4] == 0x05) {
+      for (int id = 0; id < 26; id++) {
+        final lo = data[5 + id * 2];
+        final hi = data[6 + id * 2];
+        onOffsetReceived?.call(id, lo | (hi << 8));
+      }
+      _log('🔧 收到 STM32 offset（26 組）');
+      _updateActivityTime();  // 收到回應表示連線正常
+      return false;  // 不是心跳回應
+    }
+    // MCU Reset / Bootloader 命令族回應 (0xB0，韌體 0.0.0.7+)
+    // BEGIN(0x00)/Reset(0x05) echo 為 9 bytes；INFO(0x01) 為 11 bytes
+    else if (command == 0xB0) {
+      final sub = data[4];
+      if (sub == 0x01 && data.length == 11) {
+        // INFO 回應：40 71 30 B0 01 [role] [V0] [V1] [V2] [V3] CS
+        final role = data[5];
+        final roleName = role == 0x01
+            ? 'Factory'
+            : role == 0x02
+                ? 'Active'
+                : role == 0x03
+                    ? 'Bootloader'
+                    : '未知($role)';
+        // 版本顯示與 0x05 一致：V0(data[6]) 為最低段
+        final version = '${data[9]}.${data[8]}.${data[7]}.${data[6]}';
+        _log('🔁 MCU INFO: 角色=$roleName, 版本=$version');
+        onBootloaderResponse?.call(sub, role, version);
+      } else if (sub == 0x00) {
+        _log('🔁 MCU 已進入 bootloader (BEGIN echo)');
+        onBootloaderResponse?.call(sub, -1, '');
+      } else if (sub == 0x05) {
+        _log('🔁 MCU 重置指令已確認 (Reset echo)');
+        onBootloaderResponse?.call(sub, -1, '');
+      }
+      _updateActivityTime();
+      return false;
+    }
 
     return false;
   }
@@ -1041,6 +1104,8 @@ class SerialPortManager with ArduinoConnectionMixin {
     // 以下為 STM32 專用（Arduino 沒有）
     22: {'icon': '🌡️', 'name': 'WATERtemp', 'isTemp': true},
     23: {'icon': '🌡️', 'name': 'BIBtemp', 'isTemp': true},
+    // 電阻分壓 ADC（虛擬通道 0xF0=240，指令 0x03 + payload F0）
+    240: {'icon': '🔩', 'name': 'Resistance', 'isTemp': false},
   };
 
   /// 根據 ID 取得格式化的讀取結果字串

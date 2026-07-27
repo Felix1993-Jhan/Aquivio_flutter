@@ -41,6 +41,11 @@ mixin AutoDetectionController<T extends StatefulWidget> on State<T>, DebugHistor
   void setAutoDetectionState(String status, double progress);
   void beginAutoDetection();
   void endAutoDetection();
+
+  /// 自動檢測「完整成功」後的回調（用於擷取檢測報告快照）
+  /// 只在跑完步驟 6 才呼叫；取消 / 中途失敗不會觸發
+  void onAutoDetectionCompleted();
+
   void setSelectedArduinoPort(String port);
   void setSelectedUrPort(String port);
   void setCurrentReadingState(int? id, String? section, [List<int>? secondaryIds]);
@@ -317,6 +322,9 @@ mixin AutoDetectionController<T extends StatefulWidget> on State<T>, DebugHistor
       await Future.delayed(const Duration(milliseconds: 500));
       _autoDetectionStep6ShowResult();
 
+      // 完整跑完 → 擷取檢測報告快照（取消/失敗不會到這裡）
+      onAutoDetectionCompleted();
+
     } catch (e) {
       showSnackBarMessage('自動檢測錯誤: $e');
     } finally {
@@ -468,6 +476,20 @@ mixin AutoDetectionController<T extends StatefulWidget> on State<T>, DebugHistor
     // 發送關閉全部 GPIO 指令（等待 STM32 確認回應）
     final closePayload = [0x02, 0xFF, 0xFF, 0x03, 0x00];
     await sendGpioCommandAndWait(closePayload);
+
+    if (isAutoDetectionCancelled) return false;
+
+    // 讀取 STM32 offset（命令 0x08 sub 0x05 READ OFFSET）：開機自校準基準值，一次回 26 組
+    // 早點讀，讓 Idle/Running 表格的 offset 欄在檢測過程中即可顯示
+    if (urManager.isConnected) {
+      final offsetCmd = URCommandBuilder.buildCommand([0x08, 0x05, 0x00]);
+      urManager.sendHex(offsetCmd);
+      // 事件驅動等待 58-byte 回應（收到任一組 offset 即視為已到達）
+      for (int poll = 0; poll < 8; poll++) {
+        await Future.delayed(const Duration(milliseconds: 50));
+        if (dataStorage.getStm32Offset(0) != null) break;
+      }
+    }
 
     if (isAutoDetectionCancelled) return false;
 
@@ -994,6 +1016,22 @@ mixin AutoDetectionController<T extends StatefulWidget> on State<T>, DebugHistor
         for (int poll = 0; poll < maxPolls && !dataReceived; poll++) {
           await Future.delayed(const Duration(milliseconds: pollIntervalMs));
           dataReceived = dataStorage.getStm32RunningData(id).length > prevCount;
+        }
+      }
+
+      // 讀取電阻分壓 ADC（虛擬通道 0xF0=240），跟著感測器流程問一次
+      // 回傳封包 data[4]=0xF0，自動存入 STM32 通道 240，不與 ID 0-23 衝突
+      if (!isAutoDetectionCancelled) {
+        const int resistanceId = 0xF0;
+        dataStorage.setHardwareState(resistanceId, HardwareState.running);
+        final prevCount = dataStorage.getStm32RunningData(resistanceId).length;
+        final payload = [0x03, resistanceId, 0x00, 0x00, 0x00];
+        urManager.sendHex(URCommandBuilder.buildCommand(payload));
+
+        final int maxPolls = (pressureSensorMaxWaitMs / pollIntervalMs).ceil();
+        for (int poll = 0; poll < maxPolls; poll++) {
+          await Future.delayed(const Duration(milliseconds: pollIntervalMs));
+          if (dataStorage.getStm32RunningData(resistanceId).length > prevCount) break;
         }
       }
     }
