@@ -38,6 +38,7 @@ dependencies:
   shared_preferences: ^2.2.2  # 用於持久化儲存閾值設定
   window_manager: ^0.4.3  # 用於設定視窗最小尺寸
   file_picker: ^8.0.0  # 用於選擇韌體檔案
+  excel: ^4.0.6
 
 
 dev_dependencies:
