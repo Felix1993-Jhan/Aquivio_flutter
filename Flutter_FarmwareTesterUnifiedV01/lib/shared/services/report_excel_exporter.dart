@@ -9,7 +9,9 @@
 // 輸出路徑：<桌面>/檢測報告/<modeName>/<yyyy-MM-dd>/<prefix>_HHmm_HHmm.xlsx
 // ============================================================================
 
+import 'dart:convert';
 import 'dart:io';
+import 'package:archive/archive.dart';
 import 'package:excel/excel.dart';
 import 'package:flutter_firmware_tester_unified/shared/services/test_report_service.dart';
 
@@ -32,14 +34,83 @@ typedef CellStatusResolver = CellStatus Function(
   int value,
 );
 
+/// 依「目前」判定規則即時算出一片這輪的異常項目。
+/// - Idle / Running / 感測：用與儲存格上色同一套 resolver 即時重算 →
+///   改閾值後不必重測,異常列與格子顏色永遠一致。
+/// - 溫差：沿用快照的 tempDiffErrorIds（與格子的溫差標紅同源）。
+/// - 短路 / 診斷：報告無數值欄、無法重算 → 沿用檢測當下擷取的 snapshot.abnormalItems。
+List<String> computeLiveAbnormals(
+  ReportConfig config,
+  TestSnapshot snap,
+  CellStatusResolver? resolver,
+) {
+  final items = <String>[];
+  String label(int id) => '${config.labels[id] ?? 'ID$id'} (ID$id)';
+
+  bool isBad(ReportSection sec, ReportDevice dev, int id, int? v) {
+    if (v == null || resolver == null) return false;
+    switch (resolver(sec, dev, id, v)) {
+      case CellStatus.high:
+      case CellStatus.low:
+      case CellStatus.fail:
+        return true;
+      case CellStatus.normal:
+      case CellStatus.tier1Pass:
+      case CellStatus.tier2Pass:
+        return false;
+    }
+  }
+
+  // Idle
+  for (final id in config.hwIds) {
+    final cv = snap.idle[id];
+    if (cv == null) continue;
+    if (isBad(ReportSection.idle, ReportDevice.arduino, id, cv.arduino) ||
+        (config.hasStm32 &&
+            isBad(ReportSection.idle, ReportDevice.stm32, id, cv.stm32))) {
+      items.add('Idle:${label(id)}');
+    }
+  }
+  // Running
+  for (final id in config.hwIds) {
+    final cv = snap.running[id];
+    if (cv == null) continue;
+    if (isBad(ReportSection.running, ReportDevice.arduino, id, cv.arduino) ||
+        (config.hasStm32 &&
+            isBad(ReportSection.running, ReportDevice.stm32, id, cv.stm32))) {
+      items.add('Running:${label(id)}');
+    }
+  }
+  // 感測（含溫差標紅）
+  for (final id in config.sensorIds) {
+    final cv = snap.sensor[id];
+    final bad = cv != null &&
+        (isBad(ReportSection.sensor, ReportDevice.arduino, id, cv.arduino) ||
+            (config.hasStm32 &&
+                isBad(ReportSection.sensor, ReportDevice.stm32, id, cv.stm32)));
+    if (bad || snap.tempDiffErrorIds.contains(id)) {
+      items.add('感測:${label(id)}');
+    }
+  }
+  // 短路 / 診斷：無法重算,沿用檢測當下擷取的值
+  for (final s in (snap.abnormalItems ?? const <String>[])) {
+    if (s.startsWith('短路:') || s.startsWith('診斷:')) items.add(s);
+  }
+  return items;
+}
+
 class ReportExcelExporter {
   final ReportConfig config;
   final CellStatusResolver? statusResolver;
 
+  /// 依 R_Value 即時反推版本名（讓舊快照也能顯示版本；null 則退回快照存的 versionName）
+  final String? Function(int rValue)? versionResolver;
+
   /// 每個分頁最多幾片
   static const int boardsPerSheet = 50;
 
-  ReportExcelExporter({required this.config, this.statusResolver});
+  ReportExcelExporter(
+      {required this.config, this.statusResolver, this.versionResolver});
 
   // ==================== 色票（ARGB Hex）====================
   static const String _hwHigh = '#F4B183'; // 硬體偏高：淡橘紅
@@ -172,7 +243,53 @@ class ReportExcelExporter {
     }
 
     final bytes = excel.save();
-    return bytes ?? <int>[];
+    if (bytes == null || bytes.isEmpty) return <int>[];
+    // 套件無凍結 API → 存檔後對 xlsx(zip)注入凍結窗格
+    return _withFreezePanes(bytes);
+  }
+
+  /// 對 xlsx(zip)每個 worksheet 的 <sheetView> 注入凍結：
+  /// 凍結上方 2 列（編號列 + 子欄列）與左側 1 欄（名稱欄），
+  /// 與 App 報告頁的凍結窗格一致。失敗則回傳原始 bytes（不影響匯出）。
+  List<int> _withFreezePanes(List<int> bytes) {
+    try {
+      final archive = ZipDecoder().decodeBytes(bytes);
+      final out = Archive();
+      for (final file in archive.files) {
+        final content = file.content as List<int>;
+        if (file.isFile &&
+            file.name.startsWith('xl/worksheets/sheet') &&
+            file.name.endsWith('.xml')) {
+          final patched = utf8.encode(_injectPane(utf8.decode(content)));
+          out.addFile(ArchiveFile(file.name, patched.length, patched));
+        } else {
+          out.addFile(ArchiveFile(file.name, content.length, content));
+        }
+      }
+      final encoded = ZipEncoder().encode(out);
+      return encoded ?? bytes;
+    } catch (_) {
+      return bytes; // 任何解析/壓縮異常都不影響原本匯出
+    }
+  }
+
+  /// 在 worksheet XML 的 <sheetView> 內插入凍結 <pane>（凍結 2 列 1 欄）
+  String _injectPane(String xml) {
+    const pane =
+        '<pane xSplit="1" ySplit="2" topLeftCell="B3" activePane="bottomRight" state="frozen"/>'
+        '<selection pane="bottomRight" activeCell="B3" sqref="B3"/>';
+    // 情況一：自閉合 <sheetView .../> → 展開並塞入 pane
+    final selfClosing = RegExp(r'<sheetView([^>]*?)/>');
+    if (selfClosing.hasMatch(xml)) {
+      return xml.replaceFirstMapped(
+          selfClosing, (m) => '<sheetView${m[1]}>$pane</sheetView>');
+    }
+    // 情況二：已有子節點 <sheetView ...> → 在開頭插入 pane
+    final open = RegExp(r'(<sheetView[^>]*>)');
+    if (open.hasMatch(xml)) {
+      return xml.replaceFirstMapped(open, (m) => '${m[1]}$pane');
+    }
+    return xml;
   }
 
   /// 寫入單一分頁（一批板子）
@@ -185,6 +302,11 @@ class ReportExcelExporter {
     for (int b = 0; b < boards.length; b++) {
       final baseCol = 1 + b * subN;
       _set(sheet, baseCol, 0, boards[b].serial, bg: _headerBg, bold: true);
+      // 編號右邊一格標明韌體版本（由電阻偵測；無版本則留空）
+      final ver = _versionOf(boards[b]);
+      if (ver.isNotEmpty && subN > 1) {
+        _set(sheet, baseCol + 1, 0, '韌體版本:$ver', bg: _headerBg, bold: true);
+      }
       for (int s = 0; s < subN; s++) {
         _set(sheet, baseCol + s, 1, _subLabel(sub[s]), bg: _headerBg, bold: true);
       }
@@ -262,6 +384,21 @@ class ReportExcelExporter {
       row++;
     }
 
+    // 異常列：每片列出這輪的異常項目（寫在該片首欄；正常則標「正常」）
+    _set(sheet, 0, row, '異常', bold: true);
+    for (int b = 0; b < boards.length; b++) {
+      final snap = _roundOf(boards[b], roundIndex);
+      if (snap == null) continue;
+      final items = computeLiveAbnormals(config, snap, statusResolver);
+      final baseCol = 1 + b * subN;
+      if (items.isEmpty) {
+        _set(sheet, baseCol, row, '正常', bg: _hwLow, bold: true);
+      } else {
+        _set(sheet, baseCol, row, items.join('\n'), bg: _fail);
+      }
+    }
+    row++;
+
     return row;
   }
 
@@ -326,6 +463,17 @@ class ReportExcelExporter {
       case CellStatus.low:
         return isSensor ? _sensorLow : _hwLow;
     }
+  }
+
+  /// 該片的版本名。優先用 R_Value 即時反推（舊快照也能顯示）,
+  /// 反推不到才退回快照擷取當下存的 versionName。
+  String _versionOf(BoardRecord board) {
+    for (final r in board.rounds) {
+      final v = (r.rValue != null ? versionResolver?.call(r.rValue!) : null) ??
+          r.versionName;
+      if (v != null && v.isNotEmpty) return v;
+    }
+    return '';
   }
 
   TestSnapshot? _roundOf(BoardRecord board, int roundIndex) =>

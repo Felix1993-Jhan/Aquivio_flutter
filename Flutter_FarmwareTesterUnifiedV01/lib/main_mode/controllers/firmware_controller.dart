@@ -92,10 +92,10 @@ mixin FirmwareController<T extends StatefulWidget> on State<T> {
         }
         showSnackBarMessage(message);
 
-        // 等待 STM32 啟動完成（STM32 重置後需要約 8 秒啟動時間）
+        // 等待 STM32 啟動完成（STM32 重置後需要約 9 秒啟動時間，8 秒偏極限）
         // 使用倒數計時讓現場人員知道程式正在等待
         // 注意：保持 isProgramming = true 以便進度條繼續顯示
-        const int waitSeconds = 8;
+        const int waitSeconds = 9;
         for (int remaining = waitSeconds; remaining > 0; remaining--) {
           setState(() {
             programStatus = trParams('waiting_stm32_startup_countdown', {'seconds': remaining.toString()});

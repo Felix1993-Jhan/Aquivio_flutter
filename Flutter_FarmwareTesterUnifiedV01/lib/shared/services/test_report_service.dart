@@ -151,6 +151,14 @@ class TestSnapshot {
   /// 報告中這些 ID 的 STM32 值會標紅
   final Set<int> tempDiffErrorIds;
 
+  /// 這片的異常項目（格式「類別:項目」,如「感測:MCUtemp (ID21)」）
+  /// 註：宣告為可空是為了容忍熱重載——新增此欄位後,記憶體中「舊物件」讀到的是
+  ///     null,若為非空型別會拋 _TypeError；可空即可讓熱重載存活,不需熱重啟。
+  final List<String>? abnormalItems;
+
+  /// 硬體/韌體版本名稱（由電阻 R_Value 偵測；無版本概念的模式為 null）
+  final String? versionName;
+
   /// 擷取時間
   final DateTime time;
 
@@ -162,6 +170,8 @@ class TestSnapshot {
     required this.offsetAvg,
     required this.tempDiffErrorIds,
     required this.time,
+    this.abnormalItems = const [],
+    this.versionName,
   });
 }
 
@@ -232,8 +242,11 @@ class TestReportService {
     DataStorageService ds, {
     DateTime? now,
     int Function(int id)? diffThreshold,
+    List<String> abnormalItems = const [],
+    String? versionName,
   }) {
-    final snapshot = _buildSnapshot(ds, now ?? sessionStart, diffThreshold);
+    final snapshot = _buildSnapshot(
+        ds, now ?? sessionStart, diffThreshold, abnormalItems, versionName);
 
     var board = _currentBoard;
     if (board == null) {
@@ -246,7 +259,11 @@ class TestReportService {
 
   /// 建立一份快照（讀取 DataStorageService 當下的值，依 config 取捨）
   TestSnapshot _buildSnapshot(
-      DataStorageService ds, DateTime time, int Function(int id)? diffThreshold) {
+      DataStorageService ds,
+      DateTime time,
+      int Function(int id)? diffThreshold,
+      List<String> abnormalItems,
+      String? versionName) {
     final idle = <int, ChannelValues>{};
     final running = <int, ChannelValues>{};
 
@@ -312,6 +329,8 @@ class TestReportService {
       offsetAvg: offsetAvg,
       tempDiffErrorIds: tempDiffErrorIds,
       time: time,
+      abnormalItems: abnormalItems,
+      versionName: versionName,
     );
   }
 }

@@ -15,7 +15,7 @@ import 'package:flutter_firmware_tester_unified/shared/services/report_excel_exp
 
 /// 一列的描述（左欄與資料區共用同一份序列，確保逐列對齊）
 class _RowSpec {
-  final String kind; // 'section' | 'channel' | 'scalar'
+  final String kind; // 'section' | 'channel' | 'scalar' | 'abnormal'
   final String label;
   final int round;
   final int? id;
@@ -23,6 +23,7 @@ class _RowSpec {
   final ChannelValues? Function(TestSnapshot)? pick;
   final ReportDevice? scalarDevice;
   final String? Function(TestSnapshot)? scalarPick;
+  final double height;
 
   const _RowSpec.section(this.label)
       : kind = 'section',
@@ -31,20 +32,34 @@ class _RowSpec {
         section = null,
         pick = null,
         scalarDevice = null,
-        scalarPick = null;
+        scalarPick = null,
+        height = 30;
 
   const _RowSpec.channel(
       this.label, this.round, this.id, this.section, this.pick)
       : kind = 'channel',
         scalarDevice = null,
-        scalarPick = null;
+        scalarPick = null,
+        height = 30;
 
   const _RowSpec.scalar(
       this.label, this.round, this.scalarDevice, this.scalarPick)
       : kind = 'scalar',
         id = null,
         section = null,
-        pick = null;
+        pick = null,
+        height = 30;
+
+  /// 每片各自的「異常」列（跨該片全部子欄合併成一格，可換行）
+  const _RowSpec.abnormal(this.round)
+      : kind = 'abnormal',
+        label = '異常',
+        id = null,
+        section = null,
+        pick = null,
+        scalarDevice = null,
+        scalarPick = null,
+        height = 76;
 }
 
 class ReportViewPage extends StatefulWidget {
@@ -53,12 +68,16 @@ class ReportViewPage extends StatefulWidget {
   final CellStatusResolver? statusResolver;
   final Future<void> Function()? onExport;
 
+  /// 依 R_Value 即時反推版本名（讓舊快照也能顯示版本；null 則退回快照存的 versionName）
+  final String? Function(int rValue)? versionResolver;
+
   const ReportViewPage({
     super.key,
     required this.config,
     required this.boards,
     this.statusResolver,
     this.onExport,
+    this.versionResolver,
   });
 
   @override
@@ -71,6 +90,28 @@ class _ReportViewPageState extends State<ReportViewPage> {
   final ScrollController _bodyV = ScrollController();
   final ScrollController _headerH = ScrollController();
   final ScrollController _labelV = ScrollController();
+
+  // 目前選取的列（specs 索引）；點任一格整列橫向高亮,再點同列取消
+  int? _selectedRow;
+
+  // 選取列強調色（琥珀）
+  static const Color _rowHi = Color(0xFFF6A21E);
+  static const Color _rowHiBg = Color(0xFFFFF2CC);
+
+  /// 該列是否可被選取（區塊標題 / 異常列不參與）
+  bool _selectable(_RowSpec spec) =>
+      spec.kind == 'channel' || spec.kind == 'scalar';
+
+  /// 若可選取則包一層點擊（點擊切換選取 / 取消）
+  Widget _wrapSelectable(int index, _RowSpec spec, Widget child) {
+    if (!_selectable(spec)) return child;
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () => setState(
+          () => _selectedRow = _selectedRow == index ? null : index),
+      child: child,
+    );
+  }
 
   // 色票（與 Excel 一致）
   static const Color _hwHigh = Color(0xFFF4B183);
@@ -187,6 +228,8 @@ class _ReportViewPageState extends State<ReportViewPage> {
         specs.add(_RowSpec.scalar('offset_平均', r, ReportDevice.offset,
             (s) => s.offsetAvg?.toStringAsFixed(1)));
       }
+      // 每輪結尾：各片自己的「異常」列
+      specs.add(_RowSpec.abnormal(r));
     }
     return specs;
   }
@@ -318,12 +361,15 @@ class _ReportViewPageState extends State<ReportViewPage> {
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // 編號列
+        // 編號列（編號 + 其右側跨欄顯示「韌體版本:xxx」）
         _rowWidget([
-          for (final b in boards)
-            for (int s = 0; s < sub.length; s++)
-              _cell(s == 0 ? b.serial : '', _colW,
-                  bg: _headerBg, bold: true, thickRight: s == sub.length - 1),
+          for (final b in boards) ...[
+            _cell(b.serial, _colW,
+                bg: _headerBg, bold: true, thickRight: sub.length == 1),
+            if (sub.length > 1)
+              _cell(_versionText(b), _colW * (sub.length - 1),
+                  bg: _headerBg, bold: true, thickRight: true),
+          ],
         ]),
         // 子欄列
         _rowWidget([
@@ -339,17 +385,40 @@ class _ReportViewPageState extends State<ReportViewPage> {
     );
   }
 
+  /// 該片的版本標籤。優先用 R_Value 即時反推（舊快照也能顯示）,
+  /// 反推不到才退回快照擷取當下存的 versionName。
+  String _versionText(BoardRecord b) {
+    for (final r in b.rounds) {
+      final v = (r.rValue != null ? widget.versionResolver?.call(r.rValue!) : null) ??
+          r.versionName;
+      if (v != null && v.isNotEmpty) return '韌體版本:$v';
+    }
+    return '';
+  }
+
   // ==================== 凍結左欄 ====================
   Widget _labelColumn(List<_RowSpec> specs) {
     return Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        for (final spec in specs)
-          spec.kind == 'section'
-              ? _cell(spec.label, _labelW,
-                  bg: _sectionBg, bold: true, white: true, thickRight: true)
-              : _cell(spec.label, _labelW, bold: true, thickRight: true),
+        for (int i = 0; i < specs.length; i++)
+          _wrapSelectable(
+            i,
+            specs[i],
+            specs[i].kind == 'section'
+                ? _cell(specs[i].label, _labelW,
+                    height: specs[i].height,
+                    bg: _sectionBg,
+                    bold: true,
+                    white: true,
+                    thickRight: true)
+                : _cell(specs[i].label, _labelW,
+                    height: specs[i].height,
+                    bold: true,
+                    thickRight: true,
+                    highlight: _selectedRow == i),
+          ),
       ],
     );
   }
@@ -360,17 +429,30 @@ class _ReportViewPageState extends State<ReportViewPage> {
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        for (final spec in specs) _dataRow(spec, sub),
+        for (int i = 0; i < specs.length; i++)
+          _wrapSelectable(i, specs[i], _dataRow(specs[i], sub, _selectedRow == i)),
       ],
     );
   }
 
-  Widget _dataRow(_RowSpec spec, List<ReportDevice> sub) {
+  Widget _dataRow(_RowSpec spec, List<ReportDevice> sub, bool hi) {
     if (spec.kind == 'section') {
       return _rowWidget([
         for (int i = 0; i < boards.length; i++)
           for (int s = 0; s < sub.length; s++)
-            _cell('', _colW, bg: _sectionBg, thickRight: s == sub.length - 1),
+            _cell('', _colW,
+                height: spec.height, bg: _sectionBg, thickRight: s == sub.length - 1),
+      ]);
+    }
+
+    // 異常列：每片將全部子欄合併成一格，列出該片這輪的異常項目
+    if (spec.kind == 'abnormal') {
+      return _rowWidget([
+        for (final b in boards)
+          _abnormalCell(
+            spec.round < b.rounds.length ? b.rounds[spec.round] : null,
+            _colW * sub.length,
+          ),
       ]);
     }
 
@@ -385,7 +467,7 @@ class _ReportViewPageState extends State<ReportViewPage> {
           final text = snap != null && d == spec.scalarDevice
               ? spec.scalarPick!(snap)
               : null;
-          cells.add(_cell(text ?? '', _colW, thickRight: last));
+          cells.add(_cell(text ?? '', _colW, thickRight: last, highlight: hi));
           continue;
         }
 
@@ -393,7 +475,7 @@ class _ReportViewPageState extends State<ReportViewPage> {
         final id = spec.id!;
         final section = spec.section!;
         if (section == ReportSection.sensor && d == ReportDevice.offset) {
-          cells.add(_cell('', _colW, thickRight: last));
+          cells.add(_cell('', _colW, thickRight: last, highlight: hi));
           continue;
         }
         final values = snap == null ? null : spec.pick!(snap);
@@ -405,10 +487,52 @@ class _ReportViewPageState extends State<ReportViewPage> {
             snap.tempDiffErrorIds.contains(id)) {
           bg = _sensorHigh; // 溫差過大 → 強制標紅
         }
-        cells.add(_cell(v?.toString() ?? '', _colW, bg: bg, thickRight: last));
+        cells.add(_cell(v?.toString() ?? '', _colW,
+            bg: bg, thickRight: last, highlight: hi));
       }
     }
     return _rowWidget(cells);
+  }
+
+  /// 異常格：該片這輪的異常項目（合併子欄寬、可換行）
+  /// 值類別（Idle/Running/感測）即時重算 → 與格子顏色永遠一致,改閾值不必重測。
+  Widget _abnormalCell(TestSnapshot? snap, double width) {
+    final items = snap == null
+        ? const <String>[]
+        : computeLiveAbnormals(config, snap, widget.statusResolver);
+    final bool ok = snap != null && items.isEmpty;
+    final String text = snap == null
+        ? ''
+        : (ok ? '正常' : items.join('\n'));
+    final Color color = snap == null
+        ? Colors.black87
+        : (ok ? const Color(0xFF2E7D32) : const Color(0xFFC00000));
+    return Container(
+      width: width,
+      height: 76,
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+      alignment: ok ? Alignment.center : Alignment.topLeft,
+      decoration: BoxDecoration(
+        color: snap == null
+            ? null
+            : (ok ? const Color(0x1A2E7D32) : const Color(0x14C00000)),
+        border: Border(
+          right: BorderSide(color: Colors.blueGrey.shade700, width: 2.5),
+          bottom: BorderSide(color: Colors.blueGrey.shade700, width: 2.5),
+        ),
+      ),
+      child: SingleChildScrollView(
+        child: Text(
+          text,
+          style: TextStyle(
+            fontSize: 10,
+            height: 1.25,
+            fontWeight: ok ? FontWeight.bold : FontWeight.w500,
+            color: color,
+          ),
+        ),
+      ),
+    );
   }
 
   // ==================== 共用 ====================
@@ -421,23 +545,31 @@ class _ReportViewPageState extends State<ReportViewPage> {
       bool bold = false,
       bool white = false,
       bool thickRight = false,
-      bool thickBottom = false}) {
+      bool thickBottom = false,
+      bool highlight = false}) {
     return Container(
       width: width,
       height: height,
       padding: const EdgeInsets.symmetric(horizontal: 4),
       alignment: Alignment.center,
       decoration: BoxDecoration(
-        color: bg,
+        // 選取列：無底色的格子鋪淡琥珀；有資料色的格子保留原色（另以上下框標示）
+        color: highlight && bg == null ? _rowHiBg : bg,
         border: Border(
+          top: highlight
+              ? const BorderSide(color: _rowHi, width: 2.5)
+              : BorderSide.none,
           right: BorderSide(
             color: thickRight ? Colors.blueGrey.shade700 : Colors.grey.shade300,
             width: thickRight ? 2.5 : 0.5,
           ),
-          bottom: BorderSide(
-            color: thickBottom ? Colors.blueGrey.shade700 : Colors.grey.shade300,
-            width: thickBottom ? 2.5 : 0.5,
-          ),
+          bottom: highlight
+              ? const BorderSide(color: _rowHi, width: 2.5)
+              : BorderSide(
+                  color:
+                      thickBottom ? Colors.blueGrey.shade700 : Colors.grey.shade300,
+                  width: thickBottom ? 2.5 : 0.5,
+                ),
         ),
       ),
       child: Text(
@@ -445,7 +577,7 @@ class _ReportViewPageState extends State<ReportViewPage> {
         textAlign: TextAlign.center,
         style: TextStyle(
           fontSize: 11,
-          fontWeight: bold ? FontWeight.bold : FontWeight.normal,
+          fontWeight: (bold || highlight) ? FontWeight.bold : FontWeight.normal,
           color: white ? Colors.white : Colors.black87,
         ),
         overflow: TextOverflow.ellipsis,

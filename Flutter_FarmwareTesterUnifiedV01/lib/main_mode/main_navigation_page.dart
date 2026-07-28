@@ -67,9 +67,6 @@ class _MainNavigationPageState extends State<MainNavigationPage>
   /// 程式重啟就是新的一份報告檔）
   late final TestReportService _reportService;
 
-  /// Excel 匯出器
-  late final ReportExcelExporter _reportExporter;
-
   // ==================== 狀態變數 ====================
 
   String? _selectedArduinoPort;
@@ -445,14 +442,9 @@ class _MainNavigationPageState extends State<MainNavigationPage>
     _initThresholdService();
 
     // 初始化檢測報告服務（Main 模式；sessionStart = 進入本模式時間）
-    final reportConfig = ReportConfig.main();
     _reportService = TestReportService(
-      config: reportConfig,
+      config: ReportConfig.main(),
       sessionStart: DateTime.now(),
-    );
-    _reportExporter = ReportExcelExporter(
-      config: reportConfig,
-      statusResolver: _resolveReportCellStatus,
     );
 
     // 設置 Arduino 數據接收回調
@@ -1983,18 +1975,29 @@ class _MainNavigationPageState extends State<MainNavigationPage>
   /// → 擷取一份快照到當前編號，並自動存檔到桌面
   @override
   void onAutoDetectionCompleted() {
+    final t = ThresholdSettingsService();
     _reportService.captureCurrentResults(
       _dataStorage,
-      diffThreshold: (id) => ThresholdSettingsService().getDiffThreshold(id),
+      diffThreshold: (id) => t.getDiffThreshold(id),
+      abnormalItems: _currentAbnormalItems(),
+      versionName: t.isVersionKnown ? t.activeVersionName : null,
     );
     _autoSaveReport();
   }
 
   /// 匯出報告到桌面（自動存檔 / 手動匯出共用）
+  /// 匯出器每次匯出當下才建立,確保永遠帶著最新的判定 / 版本反推邏輯
+  /// （避免快取實例在熱重載後過時,造成版本標籤時有時無）。
   Future<void> _autoSaveReport() async {
     if (!_reportService.hasData) return;
     try {
-      final path = await _reportExporter.exportToDesktop(
+      final exporter = ReportExcelExporter(
+        config: _reportService.config,
+        statusResolver: _resolveReportCellStatus,
+        versionResolver: (rv) =>
+            ThresholdSettingsService().versionNameForRValue(rv),
+      );
+      final path = await exporter.exportToDesktop(
         _reportService.boards,
         sessionStart: _reportService.sessionStart,
       );
@@ -2025,9 +2028,38 @@ class _MainNavigationPageState extends State<MainNavigationPage>
           boards: _reportService.boards,
           statusResolver: _resolveReportCellStatus,
           onExport: _autoSaveReport,
+          versionResolver: (rv) =>
+              ThresholdSettingsService().versionNameForRValue(rv),
         ),
       ),
     );
+  }
+
+  /// 最近一次檢測的異常項目清單（格式「類別:項目」）——存進每片快照
+  List<String> _currentAbnormalItems() {
+    if (!hasTestResult) return const [];
+    final items = <String>[];
+    for (final n in lastFailedIdleItems) {
+      items.add('Idle:$n');
+    }
+    for (final n in lastFailedRunningItems) {
+      items.add('Running:$n');
+    }
+    for (final n in lastFailedSensorItems) {
+      items.add('感測:$n');
+    }
+    for (final n in lastAdjacentShortItems) {
+      items.add('短路:$n');
+    }
+    for (final n in [
+      ...lastLoadDisconnectedItems,
+      ...lastGsShortItems,
+      ...lastWireErrorItems,
+      ...lastD12vShortItems,
+    ]) {
+      items.add('診斷:$n');
+    }
+    return items;
   }
 
   Widget _buildAutoDetectionPage() {
@@ -2199,10 +2231,10 @@ class _MainNavigationPageState extends State<MainNavigationPage>
         }
         _showSnackBar(message);
 
-        // 等待 STM32 啟動完成（STM32 重置後需要約 8 秒啟動時間）
+        // 等待 STM32 啟動完成（STM32 重置後需要約 9 秒啟動時間，8 秒偏極限）
         // 使用倒數計時讓現場人員知道程式正在等待
         // 注意：保持 _isProgramming = true 以便進度條繼續顯示
-        const int waitSeconds = 8;
+        const int waitSeconds = 9;
         for (int remaining = waitSeconds; remaining > 0; remaining--) {
           if (!mounted) return;
           setState(() {

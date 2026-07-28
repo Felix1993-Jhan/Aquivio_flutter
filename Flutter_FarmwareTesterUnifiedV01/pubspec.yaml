@@ -39,6 +39,7 @@ dependencies:
   window_manager: ^0.4.3  # 用於設定視窗最小尺寸
   file_picker: ^8.0.0  # 用於選擇韌體檔案
   excel: ^4.0.6
+  archive: ^3.6.1  # 匯出後對 xlsx(zip)注入凍結窗格 pane
 
 
 dev_dependencies:
