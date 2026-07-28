@@ -2128,6 +2128,9 @@ class _AutoDetectionPageState extends State<AutoDetectionPage> {
     final data = widget.dataStorage.getStm32LatestRunningData(resistanceId) ??
         widget.dataStorage.getStm32LatestIdleData(resistanceId);
     final valueText = data != null ? '${data.value}' : '--';
+    // 由 R_Value 偵測到的硬體版本
+    final ts = ThresholdSettingsService();
+    final versionText = ts.isVersionKnown ? ts.activeVersionName : '未知';
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(80, 6, 80, 0),
@@ -2146,9 +2149,9 @@ class _AutoDetectionPageState extends State<AutoDetectionPage> {
             children: [
               const Text('🔩', style: TextStyle(fontSize: 16)),
               const SizedBox(width: 8),
-              // 左：電阻版本：目前沒有定
+              // 左：硬體版本（由 R_Value 偵測）
               Text(
-                '${tr('resistance_title')}：${tr('resistance_undefined')}',
+                '硬體版本：$versionText',
                 style: TextStyle(
                   fontSize: 14,
                   fontWeight: FontWeight.bold,

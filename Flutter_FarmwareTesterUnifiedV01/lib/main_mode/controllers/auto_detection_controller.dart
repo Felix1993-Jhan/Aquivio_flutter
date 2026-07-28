@@ -171,6 +171,18 @@ mixin AutoDetectionController<T extends StatefulWidget> on State<T>, DebugHistor
     _lastD12vShortItems = List.from(d12vShortItems);
   }
 
+  // ===== 供內嵌「異常框」讀取的最近一次結果 =====
+  bool get hasTestResult => _lastTestPassed != null;
+  bool get lastTestPassed => _lastTestPassed ?? true;
+  List<String> get lastFailedIdleItems => _lastFailedIdleItems;
+  List<String> get lastFailedRunningItems => _lastFailedRunningItems;
+  List<String> get lastFailedSensorItems => _lastFailedSensorItems;
+  List<String> get lastAdjacentShortItems => _lastAdjacentShortItems;
+  List<String> get lastLoadDisconnectedItems => _lastLoadDisconnectedItems;
+  List<String> get lastGsShortItems => _lastGsShortItems;
+  List<String> get lastWireErrorItems => _lastWireErrorItems;
+  List<String> get lastD12vShortItems => _lastD12vShortItems;
+
   // ===== GPIO 命令等待機制 =====
   Completer<void>? _gpioCommandCompleter;
   int? _expectedGpioCommand;
@@ -486,6 +498,22 @@ mixin AutoDetectionController<T extends StatefulWidget> on State<T>, DebugHistor
     }
   }
 
+  /// 讀電阻(R_Value, 0x03 F0)→ 依 R_Value 判硬體版本並套用
+  /// 版本決定後續所有閾值與 STM32 運轉判定模式,故在檢測最前面呼叫。
+  Future<void> _detectHardwareVersion() async {
+    int? rValue;
+    if (urManager.isConnected) {
+      dataStorage.setHardwareState(0xF0, HardwareState.running);
+      urManager.sendHex(URCommandBuilder.buildCommand([0x03, 0xF0, 0x00, 0x00, 0x00]));
+      for (int poll = 0; poll < 10; poll++) {
+        await Future.delayed(const Duration(milliseconds: 50));
+        rValue = dataStorage.getStm32LatestRunningData(0xF0)?.value;
+        if (rValue != null) break;
+      }
+    }
+    ThresholdSettingsService().selectVersionByRValue(rValue);
+  }
+
   /// 步驟 2: 讀取無動作狀態 (Idle)
   /// 已改為在 _batchReadHardwareParallel 中針對單獨 ID 重試，不再全部重新輪詢
   Future<bool> _autoDetectionStep2ReadIdle() async {
@@ -493,6 +521,10 @@ mixin AutoDetectionController<T extends StatefulWidget> on State<T>, DebugHistor
     final closePayload = [0x02, 0xFF, 0xFF, 0x03, 0x00];
     await sendGpioCommandAndWait(closePayload);
 
+    if (isAutoDetectionCancelled) return false;
+
+    // 先讀電阻(R_Value)判硬體版本 —— 必須最先做,後面所有判定才知道套哪張 config
+    await _detectHardwareVersion();
     if (isAutoDetectionCancelled) return false;
 
     // 讀取 STM32 offset（命令 0x08 sub 0x05 READ OFFSET）：開機自校準基準值，一次回 26 組

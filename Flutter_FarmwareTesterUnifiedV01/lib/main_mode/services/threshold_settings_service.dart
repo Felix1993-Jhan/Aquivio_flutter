@@ -12,6 +12,7 @@ import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter_firmware_tester_unified/shared/models/threshold_range.dart';
 import 'package:flutter_firmware_tester_unified/shared/services/threshold_storage_mixin.dart';
+import 'version_config.dart';
 
 // ThresholdRange 類別已移至 shared/models/threshold_range.dart
 export 'package:flutter_firmware_tester_unified/shared/models/threshold_range.dart';
@@ -152,32 +153,7 @@ class ThresholdSettingsService with ThresholdStorageMixin {
     17: ThresholdRange(min: 215, max: 270),
   };
 
-  /// Arduino 感測器預設範圍 (ID 18-21)
-  static const Map<int, ThresholdRange> _defaultArduinoSensor = {
-    18: ThresholdRange(min: 0, max: 10000),    // Flow
-    19: ThresholdRange(min: 190, max: 260),    // PressureCO2
-    20: ThresholdRange(min: 190, max: 260),    // PressureWater
-    21: ThresholdRange(min: -20, max: 100),    // MCUtemp (除以10後，溫度範圍 -20~100)
-  };
-
-  /// STM32 感測器預設範圍 (ID 18-23)
-  static const Map<int, ThresholdRange> _defaultStm32Sensor = {
-    18: ThresholdRange(min: 0, max: 10000),    // Flow
-    19: ThresholdRange(min: 835, max: 875),    // PressureCO2（下限往下放寬 20：855→835）
-    20: ThresholdRange(min: 835, max: 875),    // PressureWater（下限往下放寬 20：855→835）
-    21: ThresholdRange(min: -20, max: 100),    // MCUtemp (溫度範圍 -20~100)
-    22: ThresholdRange(min: -20, max: 100),    // WATERtemp (溫度範圍 -20~100)
-    23: ThresholdRange(min: -20, max: 100),    // BIBtemp (溫度範圍 -20~100)
-  };
-
-  /// 差值比較的閾值（用於感測器中需要差值比較的項目）
-  /// WATERtemp(22) 和 BIBtemp(23) 與 Arduino MCUtemp 比對，溫差超過 5 度為異常
-  static const Map<int, int> _defaultDiffThreshold = {
-    18: 3,     // Flow 差值閾值（Arduino 與 STM32 差異不能超過 3）
-    21: 5,     // MCUtemp 差值閾值 (與 Arduino 比對)
-    22: 5,     // WATERtemp 與 Arduino MCUtemp 溫差閾值
-    23: 5,     // BIBtemp 與 Arduino MCUtemp 溫差閾值
-  };
+  // 感測器 / 差值的預設值已移至各 VersionConfig（version_config.dart）
 
   // ==================== 當前設定值 ====================
 
@@ -188,6 +164,120 @@ class ThresholdSettingsService with ThresholdStorageMixin {
   late Map<int, ThresholdRange> _arduinoSensor;
   late Map<int, ThresholdRange> _stm32Sensor;
   late Map<int, int> _diffThreshold;
+
+  // ==================== 硬體版本 ====================
+  // 每個硬體版本一份完整 config（version_config.dart）。以 R_Value(電阻)偵測,
+  // 選中的版本決定所有閾值與 STM32 運轉判定模式。
+  // 註：目前各版本閾值以程式預設為來源,尚未做各版本持久化(下一階段)。
+  final List<VersionConfig> versionConfigs = buildDefaultVersionConfigs();
+
+  /// 當前套用的版本
+  late VersionConfig _activeVersion;
+
+  /// R_Value 是否有對應到某版本（false = 未偵測/未知,暫用預設版本判定）
+  bool _versionKnown = false;
+
+  /// 當前版本名稱
+  String get activeVersionName => _activeVersion.name;
+
+  /// 是否已由 R_Value 確認版本
+  bool get isVersionKnown => _versionKnown;
+
+  /// 依 R_Value 選版本並套用（自動檢測最前面呼叫）
+  /// - 對應到某版本 → 套那版
+  /// - null / 沒對應（中間值/超範圍）→ 標未知,暫用預設版本(1.03f)判定
+  void selectVersionByRValue(int? rValue) {
+    VersionConfig? matched;
+    if (rValue != null) {
+      for (final v in versionConfigs) {
+        if (v.matchesRValue(rValue)) {
+          matched = v;
+          break;
+        }
+      }
+    }
+    _versionKnown = matched != null;
+    _activeVersion = matched ?? _defaultVersion();
+    _applyActiveVersion();
+    settingsUpdateNotifier.value++;
+  }
+
+  /// 依 R_Value 反推版本名（純查詢,不改變目前選中版本；找不到回 null）
+  /// 供報告即時反推：舊快照只要有 R_Value 也能顯示版本,不必重測。
+  String? versionNameForRValue(int? rValue) {
+    if (rValue == null) return null;
+    for (final v in versionConfigs) {
+      if (v.matchesRValue(rValue)) return v.name;
+    }
+    return null;
+  }
+
+  VersionConfig _defaultVersion() => versionConfigs.firstWhere(
+        (v) => v.name == kDefaultVersionName,
+        orElse: () => versionConfigs.first,
+      );
+
+  /// 把當前版本的完整閾值套進運作用的表
+  void _applyActiveVersion() {
+    _arduinoIdleHardware = _activeVersion.arduinoIdle;
+    _arduinoRunningHardware = _activeVersion.arduinoRunning;
+    _stm32IdleHardware = _activeVersion.stm32Idle;
+    _stm32RunningHardware = _activeVersion.stm32Running;
+    _arduinoSensor = _activeVersion.arduinoSensor;
+    _stm32Sensor = _activeVersion.stm32Sensor;
+    _diffThreshold = _activeVersion.diffThreshold;
+  }
+
+  /// 版本名稱清單（設定頁下拉用）
+  List<String> get versionNames => versionConfigs.map((v) => v.name).toList();
+
+  /// 手動選擇版本（設定頁用）→ 直接帶入該版本的閾值
+  void selectVersion(String name) {
+    _activeVersion = versionConfigs.firstWhere(
+      (v) => v.name == name,
+      orElse: () => _defaultVersion(),
+    );
+    _versionKnown = true;
+    _applyActiveVersion();
+    settingsUpdateNotifier.value++;
+  }
+
+  // ===== 各版本閾值持久化（SharedPreferences key 帶版本名）=====
+  String _vKey(VersionConfig v, String cat) => 'v_${v.name}_$cat';
+
+  void _fillR(Map<int, ThresholdRange> t, Map<int, ThresholdRange> s) =>
+      t..clear()..addAll(s);
+  void _fillI(Map<int, int> t, Map<int, int> s) => t..clear()..addAll(s);
+
+  /// 從 prefs 載入某版本已存的閾值,無則維持該版本程式預設
+  void _loadVersionThresholds(VersionConfig v) {
+    _fillR(v.arduinoIdle,
+        loadThresholdMap(_vKey(v, 'arduino_idle_hardware'), Map.from(v.arduinoIdle)));
+    _fillR(v.arduinoRunning,
+        loadThresholdMap(_vKey(v, 'arduino_running_hardware'), Map.from(v.arduinoRunning)));
+    _fillR(v.stm32Idle,
+        loadThresholdMap(_vKey(v, 'stm32_idle_hardware'), Map.from(v.stm32Idle)));
+    _fillR(v.stm32Running,
+        loadThresholdMap(_vKey(v, 'stm32_running_hardware'), Map.from(v.stm32Running)));
+    _fillR(v.arduinoSensor,
+        loadThresholdMap(_vKey(v, 'arduino_sensor'), Map.from(v.arduinoSensor)));
+    _fillR(v.stm32Sensor,
+        loadThresholdMap(_vKey(v, 'stm32_sensor'), Map.from(v.stm32Sensor)));
+    _fillI(v.diffThreshold,
+        loadIntMap(_vKey(v, 'diff_threshold'), Map.from(v.diffThreshold)));
+  }
+
+  /// 儲存當前版本的全部閾值（分項恢復預設後呼叫,讓持久化同步）
+  Future<void> _saveActiveVersionMaps() async {
+    final v = _activeVersion;
+    await saveThresholdMap(_vKey(v, 'arduino_idle_hardware'), _arduinoIdleHardware);
+    await saveThresholdMap(_vKey(v, 'arduino_running_hardware'), _arduinoRunningHardware);
+    await saveThresholdMap(_vKey(v, 'stm32_idle_hardware'), _stm32IdleHardware);
+    await saveThresholdMap(_vKey(v, 'stm32_running_hardware'), _stm32RunningHardware);
+    await saveThresholdMap(_vKey(v, 'arduino_sensor'), _arduinoSensor);
+    await saveThresholdMap(_vKey(v, 'stm32_sensor'), _stm32Sensor);
+    await saveIntMap(_vKey(v, 'diff_threshold'), _diffThreshold);
+  }
 
   // ==================== VDD/VSS 短路測試顯示設定 ====================
   /// 是否顯示 VDD 短路測試結果（預設關閉）
@@ -356,14 +446,12 @@ class ThresholdSettingsService with ThresholdStorageMixin {
 
   /// 載入設定
   Future<void> _loadSettings() async {
-    // 使用 Mixin 方法載入 Map 類型設定
-    _arduinoIdleHardware = loadThresholdMap('arduino_idle_hardware', _defaultArduinoIdleHardware);
-    _arduinoRunningHardware = loadThresholdMap('arduino_running_hardware', _defaultArduinoRunningHardware);
-    _stm32IdleHardware = loadThresholdMap('stm32_idle_hardware', _defaultStm32IdleHardware);
-    _stm32RunningHardware = loadThresholdMap('stm32_running_hardware', _defaultStm32RunningHardware);
-    _arduinoSensor = loadThresholdMap('arduino_sensor', _defaultArduinoSensor);
-    _stm32Sensor = loadThresholdMap('stm32_sensor', _defaultStm32Sensor);
-    _diffThreshold = loadIntMap('diff_threshold', _defaultDiffThreshold);
+    // 硬體版本：先載入各版本已存的閾值(prefs key 帶版本名),再套用預設版本(1.03f)。
+    for (final v in versionConfigs) {
+      _loadVersionThresholds(v);
+    }
+    _activeVersion = _defaultVersion();
+    _applyActiveVersion();
     // 使用 Mixin 方法載入 bool 類型設定
     _showVddShortTest = loadBool('show_vdd_short_test', false);
     _showVssShortTest = loadBool('show_vss_short_test', false);
@@ -411,22 +499,23 @@ class ThresholdSettingsService with ThresholdStorageMixin {
   // ==================== 取得設定值 ====================
 
   // ==================== STM32 運轉兩段判定 ====================
-  // 第一段：直接用既有的硬體閾值範圍 getHardwareThreshold（設定頁可編輯、
-  //         恢復預設也走它）——顯示的即為實際判定用的,不再分兩套。
-  // 第二段：第一段沒過時,把整段範圍往下扣 offset 再判一次（SR540 混批低群 Vf）。
-  // 這個 offset 是唯一的新變數,未來要開放設定只需改成可存的閾值即可。
-  static const int stm32RunSecondGroupOffset = 55;
-
+  // 判定模式由「當前版本 config」決定：
+  // - 第一段：既有硬體閾值範圍 getHardwareThreshold（= 當前版本的 stm32Running,
+  //           設定頁顯示的即為實際判定用的）。
+  // - 第二段：僅當版本 twoBandRunning 為 true 時,把第一段整段往下扣
+  //           secondGroupOffset 再判一次（SR540 混批低群 Vf）。舊版單段則跳過。
   /// STM32 運轉值兩段判定
   /// - pass1：落在第一段範圍（深藍）
-  /// - pass2：第一段沒過,但落在「第一段整段減 offset」的第二段範圍（淺藍）
-  /// - fail：兩段都不過（紅）
+  /// - pass2：第一段沒過,且該版本為兩段模式,落在「第一段減 offset」（淺藍）
+  /// - fail：都不過（紅）
   Stm32RunResult evaluateStm32Running(int id, int value) {
     final r = getHardwareThreshold(DeviceType.stm32, StateType.running, id);
     if (value >= r.min && value <= r.max) return Stm32RunResult.pass1;
-    if (value >= r.min - stm32RunSecondGroupOffset &&
-        value <= r.max - stm32RunSecondGroupOffset) {
-      return Stm32RunResult.pass2;
+    if (_activeVersion.twoBandRunning) {
+      final off = _activeVersion.secondGroupOffset;
+      if (value >= r.min - off && value <= r.max - off) {
+        return Stm32RunResult.pass2;
+      }
     }
     return Stm32RunResult.fail;
   }
@@ -547,18 +636,18 @@ class ThresholdSettingsService with ThresholdStorageMixin {
     if (device == DeviceType.arduino) {
       if (state == StateType.idle) {
         _arduinoIdleHardware[id] = range;
-        await saveThresholdMap('arduino_idle_hardware', _arduinoIdleHardware);
+        await saveThresholdMap(_vKey(_activeVersion, 'arduino_idle_hardware'), _arduinoIdleHardware);
       } else {
         _arduinoRunningHardware[id] = range;
-        await saveThresholdMap('arduino_running_hardware', _arduinoRunningHardware);
+        await saveThresholdMap(_vKey(_activeVersion, 'arduino_running_hardware'), _arduinoRunningHardware);
       }
     } else {
       if (state == StateType.idle) {
         _stm32IdleHardware[id] = range;
-        await saveThresholdMap('stm32_idle_hardware', _stm32IdleHardware);
+        await saveThresholdMap(_vKey(_activeVersion, 'stm32_idle_hardware'), _stm32IdleHardware);
       } else {
         _stm32RunningHardware[id] = range;
-        await saveThresholdMap('stm32_running_hardware', _stm32RunningHardware);
+        await saveThresholdMap(_vKey(_activeVersion, 'stm32_running_hardware'), _stm32RunningHardware);
       }
     }
   }
@@ -573,18 +662,18 @@ class ThresholdSettingsService with ThresholdStorageMixin {
     if (device == DeviceType.arduino) {
       if (state == StateType.idle) {
         _arduinoIdleHardware = map;
-        await saveThresholdMap('arduino_idle_hardware', _arduinoIdleHardware);
+        await saveThresholdMap(_vKey(_activeVersion, 'arduino_idle_hardware'), _arduinoIdleHardware);
       } else {
         _arduinoRunningHardware = map;
-        await saveThresholdMap('arduino_running_hardware', _arduinoRunningHardware);
+        await saveThresholdMap(_vKey(_activeVersion, 'arduino_running_hardware'), _arduinoRunningHardware);
       }
     } else {
       if (state == StateType.idle) {
         _stm32IdleHardware = map;
-        await saveThresholdMap('stm32_idle_hardware', _stm32IdleHardware);
+        await saveThresholdMap(_vKey(_activeVersion, 'stm32_idle_hardware'), _stm32IdleHardware);
       } else {
         _stm32RunningHardware = map;
-        await saveThresholdMap('stm32_running_hardware', _stm32RunningHardware);
+        await saveThresholdMap(_vKey(_activeVersion, 'stm32_running_hardware'), _stm32RunningHardware);
       }
     }
   }
@@ -593,17 +682,17 @@ class ThresholdSettingsService with ThresholdStorageMixin {
   Future<void> setSensorThreshold(DeviceType device, int id, ThresholdRange range) async {
     if (device == DeviceType.arduino) {
       _arduinoSensor[id] = range;
-      await saveThresholdMap('arduino_sensor', _arduinoSensor);
+      await saveThresholdMap(_vKey(_activeVersion, 'arduino_sensor'), _arduinoSensor);
     } else {
       _stm32Sensor[id] = range;
-      await saveThresholdMap('stm32_sensor', _stm32Sensor);
+      await saveThresholdMap(_vKey(_activeVersion, 'stm32_sensor'), _stm32Sensor);
     }
   }
 
   /// 設定差值閾值
   Future<void> setDiffThreshold(int id, int threshold) async {
     _diffThreshold[id] = threshold;
-    await saveIntMap('diff_threshold', _diffThreshold);
+    await saveIntMap(_vKey(_activeVersion, 'diff_threshold'), _diffThreshold);
   }
 
   /// 設定是否顯示 VDD 短路測試結果
@@ -702,13 +791,16 @@ class ThresholdSettingsService with ThresholdStorageMixin {
 
   /// 恢復所有設定為預設值
   Future<void> resetToDefaults() async {
-    _arduinoIdleHardware = Map.from(_defaultArduinoIdleHardware);
-    _arduinoRunningHardware = Map.from(_defaultArduinoRunningHardware);
-    _stm32IdleHardware = Map.from(_defaultStm32IdleHardware);
-    _stm32RunningHardware = Map.from(_defaultStm32RunningHardware);
-    _arduinoSensor = Map.from(_defaultArduinoSensor);
-    _stm32Sensor = Map.from(_defaultStm32Sensor);
-    _diffThreshold = Map.from(_defaultDiffThreshold);
+    // 硬體版本閾值：重建各版本 config（回到程式預設）並套用當前版本
+    final prevName = _activeVersion.name;
+    versionConfigs
+      ..clear()
+      ..addAll(buildDefaultVersionConfigs());
+    _activeVersion = versionConfigs.firstWhere(
+      (v) => v.name == prevName,
+      orElse: () => _defaultVersion(),
+    );
+    _applyActiveVersion();
     // VDD/VSS 短路測試顯示設定恢復為預設值（關閉）
     _showVddShortTest = false;
     _showVssShortTest = false;
@@ -776,51 +868,75 @@ class ThresholdSettingsService with ThresholdStorageMixin {
     notifyUpdate();
   }
 
-  /// 恢復感測器閾值為預設值
+  /// 取得「當前版本」的一份全新預設 config（用於分項恢復預設）
+  VersionConfig _freshActiveVersion() {
+    final name = _activeVersion.name;
+    final fresh = buildDefaultVersionConfigs();
+    return fresh.firstWhere((v) => v.name == name, orElse: () => fresh.first);
+  }
+
+  /// 恢復感測器閾值為預設值（就地覆蓋,維持與當前版本表的連結）
   Future<void> resetSensorToDefaults() async {
-    _arduinoSensor = Map.from(_defaultArduinoSensor);
-    _stm32Sensor = Map.from(_defaultStm32Sensor);
-    _diffThreshold = Map.from(_defaultDiffThreshold);
+    final f = _freshActiveVersion();
+    _arduinoSensor
+      ..clear()
+      ..addAll(f.arduinoSensor);
+    _stm32Sensor
+      ..clear()
+      ..addAll(f.stm32Sensor);
+    _diffThreshold
+      ..clear()
+      ..addAll(f.diffThreshold);
     _tempSensorErrorValue = defaultTempSensorErrorValue;
-    await _prefs?.remove('${_keyPrefix}arduino_sensor');
-    await _prefs?.remove('${_keyPrefix}stm32_sensor');
-    await _prefs?.remove('${_keyPrefix}diff_threshold');
+    await _saveActiveVersionMaps();
     await _prefs?.remove('${_keyPrefix}diag_temp_error');
     notifyUpdate();
   }
 
-  /// 恢復硬體閾值為預設值（所有四組）
+  /// 恢復硬體閾值為預設值（所有四組,就地覆蓋當前版本表）
   Future<void> resetHardwareToDefaults() async {
-    _arduinoIdleHardware = Map.from(_defaultArduinoIdleHardware);
-    _arduinoRunningHardware = Map.from(_defaultArduinoRunningHardware);
-    _stm32IdleHardware = Map.from(_defaultStm32IdleHardware);
-    _stm32RunningHardware = Map.from(_defaultStm32RunningHardware);
-    await _prefs?.remove('${_keyPrefix}arduino_idle_hardware');
-    await _prefs?.remove('${_keyPrefix}arduino_running_hardware');
-    await _prefs?.remove('${_keyPrefix}stm32_idle_hardware');
-    await _prefs?.remove('${_keyPrefix}stm32_running_hardware');
+    final f = _freshActiveVersion();
+    _arduinoIdleHardware
+      ..clear()
+      ..addAll(f.arduinoIdle);
+    _arduinoRunningHardware
+      ..clear()
+      ..addAll(f.arduinoRunning);
+    _stm32IdleHardware
+      ..clear()
+      ..addAll(f.stm32Idle);
+    _stm32RunningHardware
+      ..clear()
+      ..addAll(f.stm32Running);
+    await _saveActiveVersionMaps();
     notifyUpdate();
   }
 
-  /// 恢復特定類型的設定為預設值
+  /// 恢復特定類型的設定為預設值（就地覆蓋當前版本表）
   Future<void> resetCategoryToDefaults(DeviceType device, StateType state) async {
+    final f = _freshActiveVersion();
     if (device == DeviceType.arduino) {
       if (state == StateType.idle) {
-        _arduinoIdleHardware = Map.from(_defaultArduinoIdleHardware);
-        await _prefs?.remove('${_keyPrefix}arduino_idle_hardware');
+        _arduinoIdleHardware
+          ..clear()
+          ..addAll(f.arduinoIdle);
       } else {
-        _arduinoRunningHardware = Map.from(_defaultArduinoRunningHardware);
-        await _prefs?.remove('${_keyPrefix}arduino_running_hardware');
+        _arduinoRunningHardware
+          ..clear()
+          ..addAll(f.arduinoRunning);
       }
     } else {
       if (state == StateType.idle) {
-        _stm32IdleHardware = Map.from(_defaultStm32IdleHardware);
-        await _prefs?.remove('${_keyPrefix}stm32_idle_hardware');
+        _stm32IdleHardware
+          ..clear()
+          ..addAll(f.stm32Idle);
       } else {
-        _stm32RunningHardware = Map.from(_defaultStm32RunningHardware);
-        await _prefs?.remove('${_keyPrefix}stm32_running_hardware');
+        _stm32RunningHardware
+          ..clear()
+          ..addAll(f.stm32Running);
       }
     }
+    await _saveActiveVersionMaps();
     notifyUpdate();
   }
 

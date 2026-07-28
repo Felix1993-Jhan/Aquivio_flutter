@@ -215,6 +215,29 @@ class _SettingsPageState extends State<SettingsPage> {
                 ),
               ],
             ),
+            const SizedBox(height: 8),
+            // 硬體版本選擇：切換後下方閾值即為該版本（自動檢測時會依電阻自動切換）
+            Row(
+              children: [
+                const Icon(Icons.memory, size: 18, color: Colors.brown),
+                const SizedBox(width: 6),
+                const Text('硬體版本：',
+                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                DropdownButton<String>(
+                  value: _thresholdService.activeVersionName,
+                  items: _thresholdService.versionNames
+                      .map((n) => DropdownMenuItem(value: n, child: Text(n)))
+                      .toList(),
+                  onChanged: (name) {
+                    if (name == null) return;
+                    setState(() => _thresholdService.selectVersion(name));
+                  },
+                ),
+                const SizedBox(width: 12),
+                Text('（切換後下方數值即為該版本）',
+                    style: TextStyle(fontSize: 11, color: Colors.grey.shade600)),
+              ],
+            ),
             const Divider(height: 24),
 
             // 左右分欄：左邊 Arduino，右邊 STM32
