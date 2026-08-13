@@ -122,6 +122,14 @@ class LocalizationService {
       'resistance_value': '數值',
       'show_adjacent_details': '顯示相鄰短路詳情',
 
+      // 檢測報告 / 編號帶
+      'report_prefix': '前綴',
+      'report_serial_no': '編號',
+      'report_next_board': '下一片',
+      'report_show_report': '可以看報告',
+      'hardware_version': '硬體版本',
+      'unknown': '未知',
+
       // 資料儲存頁面
       'arduino_data': 'Arduino 數據',
       'stm32_data': 'STM32 數據',
@@ -684,6 +692,14 @@ class LocalizationService {
       'resistance_undefined': 'Not defined',
       'resistance_value': 'Value',
       'show_adjacent_details': 'Show Adjacent Short Details',
+
+      // Report / serial bar
+      'report_prefix': 'Prefix',
+      'report_serial_no': 'No.',
+      'report_next_board': 'Next Board',
+      'report_show_report': 'View Report',
+      'hardware_version': 'HW Version',
+      'unknown': 'Unknown',
 
       // Data storage page
       'arduino_data': 'Arduino Data',

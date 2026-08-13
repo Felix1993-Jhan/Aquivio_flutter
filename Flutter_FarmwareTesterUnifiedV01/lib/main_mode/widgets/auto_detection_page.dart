@@ -2049,26 +2049,28 @@ class _AutoDetectionPageState extends State<AutoDetectionPage> {
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const Text('前綴 ',
-                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                Text('${tr('report_prefix')} ',
+                    style: const TextStyle(
+                        fontSize: 12, fontWeight: FontWeight.bold)),
                 SizedBox(
                   width: 130,
                   child: TextField(
                     controller: _prefixCtrl,
                     style: const TextStyle(fontSize: 13),
-                    decoration: const InputDecoration(
+                    decoration: InputDecoration(
                       isDense: true,
-                      hintText: '前綴',
-                      border: OutlineInputBorder(),
-                      contentPadding:
+                      hintText: tr('report_prefix'),
+                      border: const OutlineInputBorder(),
+                      contentPadding: const
                           EdgeInsets.symmetric(horizontal: 8, vertical: 6),
                     ),
                     onChanged: (v) => widget.onReportPrefixChanged?.call(v),
                   ),
                 ),
                 const SizedBox(width: 12),
-                const Text('編號 ',
-                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                Text('${tr('report_serial_no')} ',
+                    style: const TextStyle(
+                        fontSize: 12, fontWeight: FontWeight.bold)),
                 SizedBox(
                   width: 70,
                   child: TextField(
@@ -2098,7 +2100,7 @@ class _AutoDetectionPageState extends State<AutoDetectionPage> {
             ElevatedButton.icon(
               onPressed: widget.onReportNextBoard,
               icon: const Icon(Icons.skip_next, size: 18),
-              label: const Text('下一片'),
+              label: Text(tr('report_next_board')),
               style: ElevatedButton.styleFrom(
                 backgroundColor: const Color(0xFF00695C),
                 foregroundColor: Colors.white,
@@ -2110,7 +2112,7 @@ class _AutoDetectionPageState extends State<AutoDetectionPage> {
             OutlinedButton.icon(
               onPressed: widget.onReportShowReport,
               icon: const Icon(Icons.table_chart, size: 18),
-              label: const Text('可以看報告'),
+              label: Text(tr('report_show_report')),
               style: OutlinedButton.styleFrom(
                 foregroundColor: const Color(0xFF2E7D32),
                 side: const BorderSide(color: Color(0xFF2E7D32)),
@@ -2130,7 +2132,7 @@ class _AutoDetectionPageState extends State<AutoDetectionPage> {
     final valueText = data != null ? '${data.value}' : '--';
     // 由 R_Value 偵測到的硬體版本
     final ts = ThresholdSettingsService();
-    final versionText = ts.isVersionKnown ? ts.activeVersionName : '未知';
+    final versionText = ts.isVersionKnown ? ts.activeVersionName : tr('unknown');
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(80, 6, 80, 0),
@@ -2151,7 +2153,7 @@ class _AutoDetectionPageState extends State<AutoDetectionPage> {
               const SizedBox(width: 8),
               // 左：硬體版本（由 R_Value 偵測）
               Text(
-                '硬體版本：$versionText',
+                '${tr('hardware_version')}：$versionText',
                 style: TextStyle(
                   fontSize: 14,
                   fontWeight: FontWeight.bold,
