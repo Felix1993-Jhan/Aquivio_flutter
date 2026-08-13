@@ -71,14 +71,16 @@ List<String> computeLiveAbnormals(
       items.add('Idle:${label(id)}');
     }
   }
-  // Running
-  for (final id in config.hwIds) {
-    final cv = snap.running[id];
-    if (cv == null) continue;
-    if (isBad(ReportSection.running, ReportDevice.arduino, id, cv.arduino) ||
-        (config.hasStm32 &&
-            isBad(ReportSection.running, ReportDevice.stm32, id, cv.stm32))) {
-      items.add('Running:${label(id)}');
+  // Running（Body&Door 無此區）
+  if (config.hasRunningState) {
+    for (final id in config.hwIds) {
+      final cv = snap.running[id];
+      if (cv == null) continue;
+      if (isBad(ReportSection.running, ReportDevice.arduino, id, cv.arduino) ||
+          (config.hasStm32 &&
+              isBad(ReportSection.running, ReportDevice.stm32, id, cv.stm32))) {
+        items.add('Running:${label(id)}');
+      }
     }
   }
   // 感測（含溫差標紅）
@@ -339,18 +341,21 @@ class ReportExcelExporter {
     final subN = sub.length;
     int row = startRow;
 
-    // Idle 區
-    _sectionRow(sheet, row++, subN * boards.length, '硬體無動作 (Idle)');
+    // Idle 區（無 Running 的模式改標「硬體讀值」）
+    _sectionRow(sheet, row++, subN * boards.length,
+        config.hasRunningState ? '硬體無動作 (Idle)' : '硬體讀值');
     for (final id in config.hwIds) {
       _channelRow(sheet, boards, roundIndex, row++, id, sub,
           ReportSection.idle, (snap) => snap.idle[id]);
     }
 
-    // Running 區
-    _sectionRow(sheet, row++, subN * boards.length, '硬體動作中 (Running)');
-    for (final id in config.hwIds) {
-      _channelRow(sheet, boards, roundIndex, row++, id, sub,
-          ReportSection.running, (snap) => snap.running[id]);
+    // Running 區（Body&Door 無此區）
+    if (config.hasRunningState) {
+      _sectionRow(sheet, row++, subN * boards.length, '硬體動作中 (Running)');
+      for (final id in config.hwIds) {
+        _channelRow(sheet, boards, roundIndex, row++, id, sub,
+            ReportSection.running, (snap) => snap.running[id]);
+      }
     }
 
     // 感應區

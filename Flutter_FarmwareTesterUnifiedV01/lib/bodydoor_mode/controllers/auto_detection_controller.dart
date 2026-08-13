@@ -46,6 +46,9 @@ mixin AutoDetectionController<T extends StatefulWidget> on State<T>, DebugHistor
   void showSnackBarMessage(String message);
   void showTestResultDialog(bool passed, List<String> failedItems);
 
+  /// 自動檢測「完整完成」回調（供外層擷取報告快照 + 自動存檔）
+  void onAutoDetectionCompleted();
+
   // ==================== 常數 ====================
 
   /// BodyDoor 總通道數 (ID 0-18)
@@ -104,6 +107,15 @@ mixin AutoDetectionController<T extends StatefulWidget> on State<T>, DebugHistor
     _lastTestPassed = passed;
     _lastFailedItems = List.from(failedItems);
   }
+
+  /// 是否已有檢測結果
+  bool get hasTestResult => _lastTestPassed != null;
+
+  /// 最近一次檢測是否通過
+  bool get lastTestPassed => _lastTestPassed ?? false;
+
+  /// 最近一次的異常項目清單（供報告快照）
+  List<String> get lastFailedItems => List.unmodifiable(_lastFailedItems);
 
   // ==================== 主要流程 ====================
 
@@ -304,6 +316,9 @@ mixin AutoDetectionController<T extends StatefulWidget> on State<T>, DebugHistor
 
     // 顯示結果對話框
     showTestResultDialog(passed, failedItems);
+
+    // 通知外層：擷取報告快照 + 自動存檔到桌面
+    onAutoDetectionCompleted();
   }
 
   // ==================== 批次讀取 ====================

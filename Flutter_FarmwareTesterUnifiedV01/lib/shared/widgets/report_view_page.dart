@@ -205,15 +205,18 @@ class _ReportViewPageState extends State<ReportViewPage> {
     final specs = <_RowSpec>[];
     for (int r = 0; r < maxRounds; r++) {
       if (r > 0) specs.add(_RowSpec.section('重測 $r（同編號往下）'));
-      specs.add(const _RowSpec.section('硬體無動作 (Idle)'));
+      specs.add(_RowSpec.section(
+          config.hasRunningState ? '硬體無動作 (Idle)' : '硬體讀值'));
       for (final id in config.hwIds) {
         specs.add(_RowSpec.channel('${config.labels[id] ?? 'ID$id'} (ID$id)', r,
             id, ReportSection.idle, (s) => s.idle[id]));
       }
-      specs.add(const _RowSpec.section('硬體動作中 (Running)'));
-      for (final id in config.hwIds) {
-        specs.add(_RowSpec.channel('${config.labels[id] ?? 'ID$id'} (ID$id)', r,
-            id, ReportSection.running, (s) => s.running[id]));
+      if (config.hasRunningState) {
+        specs.add(const _RowSpec.section('硬體動作中 (Running)'));
+        for (final id in config.hwIds) {
+          specs.add(_RowSpec.channel('${config.labels[id] ?? 'ID$id'} (ID$id)', r,
+              id, ReportSection.running, (s) => s.running[id]));
+        }
       }
       specs.add(const _RowSpec.section('感應偵測'));
       for (final id in config.sensorIds) {

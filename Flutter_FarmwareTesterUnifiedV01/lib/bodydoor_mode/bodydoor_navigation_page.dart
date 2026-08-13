@@ -15,6 +15,9 @@ import 'package:flutter_firmware_tester_unified/mode_selection_page.dart';
 import 'package:flutter_firmware_tester_unified/shared/services/arduino_connection_service.dart';
 import 'package:flutter_firmware_tester_unified/shared/services/serial_port_manager.dart';
 import 'package:flutter_firmware_tester_unified/shared/services/localization_service.dart';
+import 'package:flutter_firmware_tester_unified/shared/services/test_report_service.dart';
+import 'package:flutter_firmware_tester_unified/shared/services/report_excel_exporter.dart';
+import 'package:flutter_firmware_tester_unified/shared/widgets/report_view_page.dart';
 import 'services/threshold_settings_service.dart';
 import 'package:flutter_firmware_tester_unified/shared/widgets/arduino_panel.dart' hide EmeraldColors;
 import 'widgets/data_storage_page.dart';
@@ -48,6 +51,11 @@ class _BodyDoorNavigationPageState extends State<BodyDoorNavigationPage>
   // ==================== 數據儲存服務 ====================
 
   final DataStorageService _dataStorage = DataStorageService();
+
+  // ==================== 檢測報告服務 ====================
+
+  /// 檢測報告累積服務（Body&Door；sessionStart = 進入本模式時間）
+  late final TestReportService _reportService;
 
   // ==================== 狀態變數 ====================
 
@@ -250,6 +258,12 @@ class _BodyDoorNavigationPageState extends State<BodyDoorNavigationPage>
 
     // 初始化閾值設定服務
     _initThresholdService();
+
+    // 初始化檢測報告服務（Body&Door）
+    _reportService = TestReportService(
+      config: ReportConfig.bodyDoor(),
+      sessionStart: DateTime.now(),
+    );
 
     // 設置 Arduino 數據接收回調
     _arduinoManager.onDataReceived = (int id, int value) {
@@ -1119,6 +1133,13 @@ class _BodyDoorNavigationPageState extends State<BodyDoorNavigationPage>
       onDebugHistoryNext: debugHistoryNext,
       isDebugPaused: _isDebugPaused,
       onToggleDebugPause: _toggleDebugPause,
+      // 檢測報告：編號帶 + 下一片 + 看報告
+      reportPrefix: _reportService.prefix,
+      reportSuffix: _reportService.suffix,
+      onReportPrefixChanged: (v) => _reportService.prefix = v,
+      onReportSuffixChanged: (v) => _reportService.suffix = v,
+      onReportNextBoard: _reportNextBoard,
+      onReportShowReport: _showReportPage,
     );
   }
 
@@ -1148,5 +1169,64 @@ class _BodyDoorNavigationPageState extends State<BodyDoorNavigationPage>
   /// 顯示當前檢測結果
   void _showCurrentTestResult() {
     showCurrentResult();
+  }
+
+  // ==================== 檢測報告（看報告 / 匯出 Excel） ====================
+
+  /// 自動檢測「完整完成」回調 → 擷取一份快照到當前編號，並自動存檔到桌面
+  @override
+  void onAutoDetectionCompleted() {
+    _reportService.captureCurrentResults(_dataStorage);
+    _autoSaveReport();
+  }
+
+  /// 報告儲存格上色判定（Body&Door：僅 Arduino 單一讀值門檻）
+  CellStatus _resolveReportCellStatus(
+      ReportSection section, ReportDevice device, int id, int value) {
+    if (device == ReportDevice.offset) return CellStatus.normal;
+    final range = ThresholdSettingsService()
+        .getHardwareThreshold(DeviceType.arduino, StateType.idle, id);
+    if (value > range.max) return CellStatus.high;
+    if (value < range.min) return CellStatus.low;
+    return CellStatus.normal;
+  }
+
+  /// 匯出報告到桌面（自動存檔 / 手動匯出共用）
+  /// 匯出器每次匯出當下才建立,確保帶著最新判定邏輯（避免熱重載後過時）
+  Future<void> _autoSaveReport() async {
+    if (!_reportService.hasData) return;
+    try {
+      final exporter = ReportExcelExporter(
+        config: _reportService.config,
+        statusResolver: _resolveReportCellStatus,
+      );
+      final path = await exporter.exportToDesktop(
+        _reportService.boards,
+        sessionStart: _reportService.sessionStart,
+      );
+      _showSnackBar('報告已存檔：$path');
+    } catch (e) {
+      _showSnackBar('報告存檔失敗：$e');
+    }
+  }
+
+  /// 下一片（編號 +1）→ 下次檢測視為新的一片
+  void _reportNextBoard() {
+    setState(() => _reportService.nextBoard());
+    _showSnackBar('編號 → ${_reportService.currentSerial}（下一片）');
+  }
+
+  /// 開啟 App 內報告表格頁
+  void _showReportPage() {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => ReportViewPage(
+          config: _reportService.config,
+          boards: _reportService.boards,
+          statusResolver: _resolveReportCellStatus,
+          onExport: _autoSaveReport,
+        ),
+      ),
+    );
   }
 }

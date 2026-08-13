@@ -57,6 +57,11 @@ class ReportConfig {
   /// 溫差比對的 Arduino 參考溫度 ID（Main：MCUtemp = 21）
   final int tempRefId;
 
+  /// 是否有「硬體動作中 (Running)」狀態。
+  /// Main 有 Idle/Running 兩段；Body&Door 單次讀取、無 Running → 設 false，
+  /// 報告 / Excel 會跳過 Running 區,只顯示讀值 + 感應。
+  final bool hasRunningState;
+
   const ReportConfig({
     required this.modeName,
     required this.filePrefix,
@@ -70,6 +75,7 @@ class ReportConfig {
     this.arduinoDiv10Ids = const {},
     this.tempDiffIds = const {},
     this.tempRefId = -1,
+    this.hasRunningState = true,
   });
 
   /// Main Board 設定
@@ -117,6 +123,7 @@ class ReportConfig {
       hasStm32: false,
       hasOffset: false,
       hasResistance: false,
+      hasRunningState: false, // 單次讀取，無 Running 區
     );
   }
 }
@@ -277,11 +284,14 @@ class TestReportService {
         arduino: ds.getArduinoFirstIdleData(id)?.value,
         stm32: config.hasStm32 ? ds.getStm32FirstIdleData(id)?.value : null,
       );
-      running[id] = ChannelValues(
-        offset: offset,
-        arduino: ds.getArduinoLatestRunningData(id)?.value,
-        stm32: config.hasStm32 ? ds.getStm32LatestRunningData(id)?.value : null,
-      );
+      // 無 Running 狀態的模式（Body&Door）跳過,不留空白 Running 欄
+      if (config.hasRunningState) {
+        running[id] = ChannelValues(
+          offset: offset,
+          arduino: ds.getArduinoLatestRunningData(id)?.value,
+          stm32: config.hasStm32 ? ds.getStm32LatestRunningData(id)?.value : null,
+        );
+      }
     }
 
     final sensor = <int, ChannelValues>{};

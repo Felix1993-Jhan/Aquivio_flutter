@@ -9,6 +9,7 @@
 // ============================================================================
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show FilteringTextInputFormatter;
 import 'package:flutter_firmware_tester_unified/shared/services/data_storage_service.dart';
 import 'package:flutter_firmware_tester_unified/shared/services/localization_service.dart';
 import '../services/threshold_settings_service.dart';
@@ -87,6 +88,25 @@ class AutoDetectionPage extends StatefulWidget {
   /// 切換調試暫停狀態回調
   final VoidCallback? onToggleDebugPause;
 
+  // ===== 檢測報告：編號帶 =====
+  /// 編號前綴
+  final String reportPrefix;
+
+  /// 編號後綴
+  final int reportSuffix;
+
+  /// 前綴變更回調
+  final void Function(String)? onReportPrefixChanged;
+
+  /// 後綴變更回調
+  final void Function(int)? onReportSuffixChanged;
+
+  /// 下一片（編號 +1）回調
+  final VoidCallback? onReportNextBoard;
+
+  /// 開啟報告表格頁回調
+  final VoidCallback? onReportShowReport;
+
   const AutoDetectionPage({
     super.key,
     required this.dataStorage,
@@ -113,6 +133,12 @@ class AutoDetectionPage extends StatefulWidget {
     this.onDebugHistoryNext,
     this.isDebugPaused = false,
     this.onToggleDebugPause,
+    this.reportPrefix = '',
+    this.reportSuffix = 1,
+    this.onReportPrefixChanged,
+    this.onReportSuffixChanged,
+    this.onReportNextBoard,
+    this.onReportShowReport,
   });
 
   @override
@@ -124,10 +150,23 @@ class _AutoDetectionPageState extends State<AutoDetectionPage> {
   final ScrollController _doorScrollController = ScrollController();
   static const double _dataRowHeight = 40.0;
 
+  // 編號帶輸入框
+  late final TextEditingController _prefixCtrl;
+  late final TextEditingController _suffixCtrl;
+
+  @override
+  void initState() {
+    super.initState();
+    _prefixCtrl = TextEditingController(text: widget.reportPrefix);
+    _suffixCtrl = TextEditingController(text: widget.reportSuffix.toString());
+  }
+
   @override
   void dispose() {
     _bodyScrollController.dispose();
     _doorScrollController.dispose();
+    _prefixCtrl.dispose();
+    _suffixCtrl.dispose();
     super.dispose();
   }
 
@@ -138,6 +177,99 @@ class _AutoDetectionPageState extends State<AutoDetectionPage> {
         widget.currentReadingSection != oldWidget.currentReadingSection) {
       _scrollToCurrentItem();
     }
+    // 編號被外部更新（例如按「下一片」+1）時，同步輸入框文字
+    if (widget.reportSuffix != oldWidget.reportSuffix &&
+        _suffixCtrl.text != widget.reportSuffix.toString()) {
+      _suffixCtrl.text = widget.reportSuffix.toString();
+    }
+  }
+
+  /// 編號帶：前綴 + 編號（皆可手動填）＋ 下一片 ＋ 可以看報告
+  Widget _buildSerialBar() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 6, 12, 2),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: Colors.blueGrey.shade300, width: 1.5),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text('${tr('report_prefix')} ',
+                    style: const TextStyle(
+                        fontSize: 12, fontWeight: FontWeight.bold)),
+                SizedBox(
+                  width: 130,
+                  child: TextField(
+                    controller: _prefixCtrl,
+                    style: const TextStyle(fontSize: 13),
+                    decoration: InputDecoration(
+                      isDense: true,
+                      hintText: tr('report_prefix'),
+                      border: const OutlineInputBorder(),
+                      contentPadding: const
+                          EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                    ),
+                    onChanged: (v) => widget.onReportPrefixChanged?.call(v),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Text('${tr('report_serial_no')} ',
+                    style: const TextStyle(
+                        fontSize: 12, fontWeight: FontWeight.bold)),
+                SizedBox(
+                  width: 70,
+                  child: TextField(
+                    controller: _suffixCtrl,
+                    keyboardType: TextInputType.number,
+                    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                    style: const TextStyle(fontSize: 13),
+                    decoration: const InputDecoration(
+                      isDense: true,
+                      hintText: '000',
+                      border: OutlineInputBorder(),
+                      contentPadding:
+                          EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                    ),
+                    onChanged: (v) {
+                      final n = int.tryParse(v);
+                      if (n != null) widget.onReportSuffixChanged?.call(n);
+                    },
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const Spacer(),
+          if (widget.onReportNextBoard != null)
+            ElevatedButton.icon(
+              onPressed: widget.onReportNextBoard,
+              icon: const Icon(Icons.skip_next, size: 18),
+              label: Text(tr('report_next_board')),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF00695C),
+                foregroundColor: Colors.white,
+              ),
+            ),
+          const SizedBox(width: 8),
+          if (widget.onReportShowReport != null)
+            OutlinedButton.icon(
+              onPressed: widget.onReportShowReport,
+              icon: const Icon(Icons.table_chart, size: 18),
+              label: Text(tr('report_show_report')),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: const Color(0xFF2E7D32),
+                side: const BorderSide(color: Color(0xFF2E7D32)),
+              ),
+            ),
+        ],
+      ),
+    );
   }
 
   void _scrollToCurrentItem() {
@@ -194,6 +326,8 @@ class _AutoDetectionPageState extends State<AutoDetectionPage> {
                   children: [
                     Column(
                       children: [
+                        // 編號帶：前綴 + 編號（可填）＋ 下一片 ＋ 可以看報告
+                        _buildSerialBar(),
                         _buildConnectionControlBar(),
                         if (widget.isAutoDetecting) _buildAutoDetectionProgress(),
                         Expanded(
