@@ -80,41 +80,44 @@ Map<int, ThresholdRange> _arduinoSensorDefault() => {
     };
 Map<int, int> _diffDefault() => {18: 3, 21: 5, 22: 5, 23: 5};
 
-/// 1.03f（新硬體）：STM32 運轉 215~270、兩段(−55)、有電阻(125~165)、ID2 偏高 +20
+/// 1.03f（新硬體）：STM32 運轉 228~295、兩段(−67)、有電阻(125~165)、ID2 偏高 +20
+/// 註：STM32 開啟內部溫感通道後整體 ADC 上抬約 25，運轉/壓力上限一併 +25；
+///     為避免兩段重疊，下限取兩群中間數 228（tier1=228~295、tier2=161~228 於 228 相接）
 VersionConfig _v103f() => VersionConfig(
       name: '1.03f',
       rValueDetectRange: const ThresholdRange(min: 125, max: 165),
       arduinoIdle: _arduinoIdleDefault(),
       arduinoRunning: _arduinoRunningDefault(),
       stm32Idle: _stm32IdleDefault(),
-      stm32Running: _runningWithId2High(215, 270, 20),
+      stm32Running: _runningWithId2High(228, 295, 20), // 上限 +25、下限取中間數
       arduinoSensor: _arduinoSensorDefault(),
       stm32Sensor: {
         18: const ThresholdRange(min: 0, max: 10000), // Flow
-        19: const ThresholdRange(min: 835, max: 875), // PressureCO2
-        20: const ThresholdRange(min: 835, max: 875), // PressureWater
+        19: const ThresholdRange(min: 835, max: 900), // PressureCO2（上限 +25）
+        20: const ThresholdRange(min: 835, max: 900), // PressureWater（上限 +25）
         21: const ThresholdRange(min: -20, max: 100), // MCUtemp
         22: const ThresholdRange(min: -20, max: 100), // WATERtemp
         23: const ThresholdRange(min: -20, max: 100), // BIBtemp
       },
       diffThreshold: _diffDefault(),
       twoBandRunning: true,
-      secondGroupOffset: 55,
+      secondGroupOffset: 67, // 兩群在 228 相接（295−67=228）
     );
 
-/// 舊版硬體：STM32 運轉 265~290、單段、無電阻(R_Value≈0,<10)、ID2 偏高 +45
+/// 舊版硬體：STM32 運轉 265~315、單段、無電阻(R_Value≈0,<10)、ID2 偏高 +45
+/// 註：STM32 開啟內部溫感通道後整體 ADC 上抬約 25，運轉/壓力上限一併 +25
 VersionConfig _legacy() => VersionConfig(
       name: '舊版',
       rValueDetectRange: const ThresholdRange(min: 0, max: 9),
       arduinoIdle: _arduinoIdleDefault(),
       arduinoRunning: _arduinoRunningDefault(),
       stm32Idle: _stm32IdleDefault(),
-      stm32Running: _runningWithId2High(265, 290, 45),
+      stm32Running: _runningWithId2High(265, 315, 45), // 上限 +25
       arduinoSensor: _arduinoSensorDefault(),
       stm32Sensor: {
         18: const ThresholdRange(min: 0, max: 10000),
-        19: const ThresholdRange(min: 855, max: 875), // 舊版壓力未下修
-        20: const ThresholdRange(min: 855, max: 875),
+        19: const ThresholdRange(min: 855, max: 900), // 舊版壓力（上限 +25）
+        20: const ThresholdRange(min: 855, max: 900),
         21: const ThresholdRange(min: -20, max: 100),
         22: const ThresholdRange(min: -20, max: 100),
         23: const ThresholdRange(min: -20, max: 100),
