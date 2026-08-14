@@ -69,7 +69,7 @@ class VersionConfig {
 }
 
 // ===== 各版本共用的預設閾值（僅作初始值,各版本仍各持一份可各自調整）=====
-Map<int, ThresholdRange> _arduinoIdleDefault() => _uniform(770, 830);
+Map<int, ThresholdRange> _arduinoIdleDefault() => _uniform(740, 830);
 Map<int, ThresholdRange> _arduinoRunningDefault() => _uniform(25, 60);
 Map<int, ThresholdRange> _stm32IdleDefault() => _uniform(0, 55);
 Map<int, ThresholdRange> _arduinoSensorDefault() => {
@@ -80,12 +80,12 @@ Map<int, ThresholdRange> _arduinoSensorDefault() => {
     };
 Map<int, int> _diffDefault() => {18: 3, 21: 5, 22: 5, 23: 5};
 
-/// 1.03f（新硬體）：STM32 運轉 228~295、兩段(−67)、有電阻(125~165)、ID2 偏高 +20
+/// 1.03f（新硬體）：STM32 運轉 228~295、兩段(−67)、有電阻(140~190)、ID2 偏高 +20
 /// 註：STM32 開啟內部溫感通道後整體 ADC 上抬約 25，運轉/壓力上限一併 +25；
 ///     為避免兩段重疊，下限取兩群中間數 228（tier1=228~295、tier2=161~228 於 228 相接）
 VersionConfig _v103f() => VersionConfig(
       name: '1.03f',
-      rValueDetectRange: const ThresholdRange(min: 125, max: 165),
+      rValueDetectRange: const ThresholdRange(min: 140, max: 190),
       arduinoIdle: _arduinoIdleDefault(),
       arduinoRunning: _arduinoRunningDefault(),
       stm32Idle: _stm32IdleDefault(),
