@@ -512,9 +512,15 @@ class ThresholdSettingsService with ThresholdStorageMixin {
     final r = getHardwareThreshold(DeviceType.stm32, StateType.running, id);
     if (value >= r.min && value <= r.max) return Stm32RunResult.pass1;
     if (_activeVersion.twoBandRunning) {
-      final off = _activeVersion.secondGroupOffset;
-      if (value >= r.min - off && value <= r.max - off) {
-        return Stm32RunResult.pass2;
+      // 優先用「明確第二段範圍」（高/低段寬度可不同）；未指定才沿用整段減 offset
+      final sb = _activeVersion.stm32RunningSecondBand;
+      if (sb != null) {
+        if (value >= sb.min && value <= sb.max) return Stm32RunResult.pass2;
+      } else {
+        final off = _activeVersion.secondGroupOffset;
+        if (value >= r.min - off && value <= r.max - off) {
+          return Stm32RunResult.pass2;
+        }
       }
     }
     return Stm32RunResult.fail;

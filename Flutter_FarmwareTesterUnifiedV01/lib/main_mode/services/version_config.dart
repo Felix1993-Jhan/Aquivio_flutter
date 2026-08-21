@@ -46,8 +46,12 @@ class VersionConfig {
   /// 運轉是否用「兩段判定」（第一段沒過再用第一段整段減 offset 判第二段）
   final bool twoBandRunning;
 
-  /// 兩段判定的第二段偏移量（twoBandRunning 為 true 時使用）
+  /// 兩段判定的第二段偏移量（twoBandRunning 為 true、且未指定 stm32RunningSecondBand 時使用）
   final int secondGroupOffset;
+
+  /// 第二段「明確範圍」（優先於 secondGroupOffset）。
+  /// 用於高/低段寬度不同的情況（例：高段 300~375、低段 245~300）。null 則沿用 offset。
+  final ThresholdRange? stm32RunningSecondBand;
 
   VersionConfig({
     required this.name,
@@ -61,6 +65,7 @@ class VersionConfig {
     required this.diffThreshold,
     required this.twoBandRunning,
     required this.secondGroupOffset,
+    this.stm32RunningSecondBand,
   });
 
   /// R_Value 是否落在此版本的偵測範圍
@@ -80,28 +85,29 @@ Map<int, ThresholdRange> _arduinoSensorDefault() => {
     };
 Map<int, int> _diffDefault() => {18: 3, 21: 5, 22: 5, 23: 5};
 
-/// 1.03f（新硬體）：STM32 運轉 228~295、兩段(−67)、有電阻(140~190)、ID2 偏高 +20
-/// 註：STM32 開啟內部溫感通道後整體 ADC 上抬約 25，運轉/壓力上限一併 +25；
-///     為避免兩段重疊，下限取兩群中間數 228（tier1=228~295、tier2=161~228 於 228 相接）
+/// 1.03f（新硬體）：STM32 運轉 高段 300~375 / 低段 245~300、電阻(220~260)、ID2 不特化
+/// 註：韌體修正 ADC Sampling Time（1.5→79.5 cyc）後，讀值為未污染真值、run-to-run 穩定；
+///     舊的污染/補償假象消失，ID2 不再需要特化，門檻整體重訂。
 VersionConfig _v103f() => VersionConfig(
       name: '1.03f',
-      rValueDetectRange: const ThresholdRange(min: 140, max: 190),
+      rValueDetectRange: const ThresholdRange(min: 220, max: 260),
       arduinoIdle: _arduinoIdleDefault(),
       arduinoRunning: _arduinoRunningDefault(),
       stm32Idle: _stm32IdleDefault(),
-      stm32Running: _runningWithId2High(228, 295, 20), // 上限 +25、下限取中間數
+      stm32Running: _uniform(300, 375), // 高段（第一段）
       arduinoSensor: _arduinoSensorDefault(),
       stm32Sensor: {
         18: const ThresholdRange(min: 0, max: 10000), // Flow
-        19: const ThresholdRange(min: 835, max: 900), // PressureCO2（上限 +25）
-        20: const ThresholdRange(min: 835, max: 900), // PressureWater（上限 +25）
+        19: const ThresholdRange(min: 835, max: 900), // PressureCO2
+        20: const ThresholdRange(min: 835, max: 900), // PressureWater
         21: const ThresholdRange(min: -20, max: 100), // MCUtemp
         22: const ThresholdRange(min: -20, max: 100), // WATERtemp
         23: const ThresholdRange(min: -20, max: 100), // BIBtemp
       },
       diffThreshold: _diffDefault(),
       twoBandRunning: true,
-      secondGroupOffset: 67, // 兩群在 228 相接（295−67=228）
+      secondGroupOffset: 0, // 已改用明確第二段範圍，offset 不使用
+      stm32RunningSecondBand: const ThresholdRange(min: 245, max: 300), // 低段
     );
 
 /// 舊版硬體：STM32 運轉 265~315、單段、無電阻(R_Value≈0,<10)、ID2 偏高 +45

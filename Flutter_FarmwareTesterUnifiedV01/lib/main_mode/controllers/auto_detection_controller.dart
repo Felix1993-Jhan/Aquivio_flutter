@@ -504,11 +504,16 @@ mixin AutoDetectionController<T extends StatefulWidget> on State<T>, DebugHistor
     int? rValue;
     if (urManager.isConnected) {
       dataStorage.setHardwareState(0xF0, HardwareState.running);
-      urManager.sendHex(URCommandBuilder.buildCommand([0x03, 0xF0, 0x00, 0x00, 0x00]));
-      for (int poll = 0; poll < 10; poll++) {
-        await Future.delayed(const Duration(milliseconds: 50));
-        rValue = dataStorage.getStm32LatestRunningData(0xF0)?.value;
-        if (rValue != null) break;
+      // 重送多次直到拿到 R_Value：單送一次有時封包遺失，會誤判為「未知」版本
+      // （現象：R_Value 卡片有值、版本卻沒顯示）。必須確實拿到值才決定版本。
+      for (int attempt = 0; attempt < 5 && rValue == null; attempt++) {
+        urManager.sendHex(
+            URCommandBuilder.buildCommand([0x03, 0xF0, 0x00, 0x00, 0x00]));
+        for (int poll = 0; poll < 10; poll++) {
+          await Future.delayed(const Duration(milliseconds: 50));
+          rValue = dataStorage.getStm32LatestRunningData(0xF0)?.value;
+          if (rValue != null) break;
+        }
       }
     }
     ThresholdSettingsService().selectVersionByRValue(rValue);
